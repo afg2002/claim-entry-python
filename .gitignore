@@ -1,0 +1,7 @@
+.venv/
+mineru-clean/
+__pycache__/
+*.py[cod]
+config.properties
+output/
+*.log

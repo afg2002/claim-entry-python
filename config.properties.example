@@ -1,0 +1,55 @@
+# OpenAI-compatible remote VLM gateway
+BASE_URL=https://example.com/openapi
+API_KEY=replace-with-your-api-key
+
+# Model for Docling Remote VLM OCR/Markdown conversion
+VLM_MODEL=google/gemini-3.1-flash-lite
+
+# Model for the legacy fallback only. The default extraction path uses the
+# LangExtract settings below.
+EXTRACTION_MODEL=google/gemini-3.1-flash-lite
+
+# Backward-compatible fallback when VLM_MODEL/EXTRACTION_MODEL are omitted
+MODEL=google/gemini-3.1-flash-lite
+
+# LangExtract (runs after VLM has produced Markdown)
+# openai: OpenAI or an OpenAI-compatible gateway; gemini: native Gemini;
+# ollama: local Ollama. output_schema is supported by openai/gemini only.
+LANGEXTRACT_PROVIDER=openai
+LANGEXTRACT_MODEL=google/gemini-3.1-flash-lite
+LANGEXTRACT_BASE_URL=https://example.com/openapi
+LANGEXTRACT_API_KEY=replace-with-your-api-key
+LANGEXTRACT_MAX_CHAR_BUFFER=2000
+LANGEXTRACT_BATCH_LENGTH=4
+LANGEXTRACT_MAX_WORKERS=4
+LANGEXTRACT_EXTRACTION_PASSES=1
+# Optional context from the previous chunk; leave empty to disable it.
+LANGEXTRACT_CONTEXT_WINDOW_CHARS=
+LANGEXTRACT_USE_OUTPUT_SCHEMA=true
+# Keep false by default: ICD suggestions are analysis, not document facts. The
+# extraction stage still runs this pass automatically, but only when a
+# diagnosis was found and the document carries no ICD code at all.
+LANGEXTRACT_ENABLE_ICD_SUGGESTIONS=false
+LANGEXTRACT_ICD_SUGGESTION_MODEL=google/gemini-3.1-flash-lite
+LANGEXTRACT_SHOW_PROGRESS=false
+# Do not silently switch back to the old giant-JSON extractor.
+LANGEXTRACT_FALLBACK_TO_LEGACY=false
+
+# Cost configuration (legacy remote-VLM path)
+USD_TO_IDR=18000
+INPUT_RATE_PER_MILLION=0.25
+OUTPUT_RATE_PER_MILLION=1.50
+
+# Per-stage rates for token usage and cost reporting. When omitted they fall
+# back to INPUT_RATE_PER_MILLION / OUTPUT_RATE_PER_MILLION above.
+VLM_INPUT_RATE_PER_MILLION=0.25
+VLM_OUTPUT_RATE_PER_MILLION=1.50
+LANGEXTRACT_INPUT_RATE_PER_MILLION=0.25
+LANGEXTRACT_OUTPUT_RATE_PER_MILLION=1.50
+
+# When a provider does not return a usage block, estimate the missing token
+# counts with tiktoken so the UI and JSON still show numbers. Estimates are
+# always reported under `estimated` and flagged with source=estimated; they
+# are never mixed into the `reported` counters. Set false to show
+# "unavailable" instead of an estimate.
+USAGE_ESTIMATE_FALLBACK=true
