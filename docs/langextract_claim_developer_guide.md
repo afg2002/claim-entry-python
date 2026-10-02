@@ -102,6 +102,21 @@ python -m unittest tests.test_langextract_service -v
 
 Naikkan `SCHEMA_VERSION` bila mengubah bentuk atau makna field.
 
+## Menambah rules bisnis (1 pintu: ClaimRulebook)
+
+Jangan edit tuple di `services/claim_rules.py` atau string prompt di
+`services/langextract_service.py`. Edit `schemas/claim_rulebook.py`:
+
+1. Tambah/ubah 1 field Pydantic + 1 kalimat `Field(description=...)`.
+2. Prompt (`build_prompt(rulebook)`), schema, validasi, dan tab Debug
+   prompt ikut berubah otomatis.
+3. Fungsi rules (`canonical_visit_type`, `canonical_claim_case_type`,
+   `visit_type_from_documents`, `detect_overseas`,
+   `overseas_currency_fallback`, `name_similarity_pct`) menerima
+   argumen opsional `rulebook`; default `DEFAULT_RULEBOOK`.
+
+Detail lengkap: [`docs/claim_rulebook.md`](claim_rulebook.md).
+
 ## Menambah field derived
 
 Jangan menambah `risk_score`, `is_fraud`, `recommended_visit_type`, atau `suggested_icd_code` ke `CLAIM_FIELDS`. Tambahkan di `derive_claim_analysis()`:
@@ -160,7 +175,7 @@ Aturan saat menambah field:
 - Field yang jelas (`address`, `diagnosis`, `policy_holder_name`) sengaja dibiarkan tanpa deskripsi untuk menghemat token.
 - Description **hanya boleh** pada field `scalar`/`list`. Field `derived`/`group` tidak boleh, karena itu akan mendorong model menghasilkannya; `validate_registry()` menolak pelanggaran ini.
 - Nama dokumen (`document_type`) **dipakai apa adanya** dari LLM dan tidak pernah dipaksa ke daftar. Tidak ada label tangkap-all seperti `other`; halaman yang tidak dinamai LLM tetap `null` dengan `source="not_named"` agar celahnya terlihat, bukan disamarkan.
-- Kategori bisnis ditambahkan sebagai enum **terpisah** (`DOCUMENT_CATEGORIES` / `DocumentCategory`) tanpa nilai tangkap-all, dan hanya dipakai `visit_type_from_documents` untuk menentukan rawat inap atau rawat jalan. Tambah label rawat inap baru di `INPATIENT_TEXT_MARKERS`, atau rawat jalan di `OUTPATIENT_TEXT_MARKERS`.
+- Kategori bisnis ditambahkan sebagai enum **terpisah** (`DOCUMENT_CATEGORIES` / `DocumentCategory`) tanpa nilai tangkap-all, dan hanya dipakai `visit_type_from_documents` untuk menentukan rawat inap atau rawat jalan. Tambah label baru di `schemas/claim_rulebook.py` (`DocumentRules.inpatient_text_markers` / `outpatient_text_markers` / `inpatient_document_types`), bukan di tuple `services/claim_rules.py`.
 - Kontrak respons `PageClassification` di `services/page_classifier.py` adalah Pydantic model. Semua arahan ada di `Field(description=...)`, yang otomatis ikut ke JSON schema, sehingga prompt cukup satu kalimat.
 - `document_type` sengaja **tidak** memakai enum: memaksanya ke daftar tertutup hanya menghasilkan label generik untuk dokumen di luar daftar.
 

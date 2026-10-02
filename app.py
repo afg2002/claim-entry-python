@@ -16,6 +16,7 @@ from config import AppConfig
 from comparison import compare_results, similarity_matrix
 from comparison.metrics import usage_stage_reports
 from parsers import parse_docling, parse_mineru
+from services.claim_form import refresh_grouped_decisions
 from services.usage_tracker import combine_usage_reports
 from utils import (
     PARSER_FORMAT_SUPPORT,
@@ -26,6 +27,7 @@ from utils import (
     get_incompatible_parsers,
     is_image_file,
 )
+from utils.formatting import format_amount
 
 
 APP_TITLE = "Document Parser Comparison Lab"
@@ -46,6 +48,79 @@ USAGE_STAGE_LABELS = {
     "icd_suggestion": "ICD suggestion",
     "document_total": "Total dokumen",
 }
+
+
+def _render_grouped_claim(grouped: dict[str, Any]) -> None:
+    """Render slim grouped JSON per screenshot (memberInfo/header/policyInfo).
+
+    Setiap parent hanya dirender bila ada (yang ngga masuk gausah ada
+    parentnya). Key memakai nama editForm agar siap autofill.
+    """
+    flags = st.columns(6)
+    flags[0].metric("New claim", str(bool(grouped.get("isNewClaim"))))
+    flags[1].metric("Kelengkapan", str(bool(grouped.get("isKelengkapan"))))
+    flags[2].metric("RI", str(bool(grouped.get("isRI"))))
+    flags[3].metric("RJ", str(bool(grouped.get("isRJ"))))
+    flags[4].metric("Overseas", str(bool(grouped.get("isOverseas"))))
+    flags[5].metric("Possible new", str(bool(grouped.get("possibleNewClaim"))))
+    for conf_key, conf_label in (
+        ("riConfidence", "RI confidence"),
+        ("rjConfidence", "RJ confidence"),
+    ):
+        if grouped.get(conf_key) is not None:
+            st.progress(
+                min(100, max(0, int(float(grouped[conf_key])))),
+                text=f"{conf_label}: {grouped[conf_key]}",
+            )
+
+    for decision_name, decision in (grouped.get("decisions") or {}).items():
+        if not isinstance(decision, dict):
+            continue
+        with st.expander(
+            f"Keputusan {decision_name}: {decision.get('value', '-')}", expanded=False
+        ):
+            st.write(f"**Reason:** {decision.get('reason') or '-'}")
+            st.caption(f"Method: `{decision.get('method') or '-'}`")
+            if decision.get("evidence"):
+                st.caption("Evidence: " + " | ".join(map(str, decision["evidence"])))
+            if decision.get("confidence") is not None:
+                st.caption(f"Confidence: {decision.get('confidence')}")
+
+    if grouped.get("memberInfo"):
+        st.markdown("**MEMBER INFO**")
+        st.json(grouped["memberInfo"], expanded=True)
+    if grouped.get("header"):
+        st.markdown("**HEADER**")
+        st.json(grouped["header"], expanded=True)
+    if grouped.get("policyInfo"):
+        st.markdown("**POLICY**")
+        st.json(grouped["policyInfo"], expanded=True)
+    if grouped.get("serviceLines"):
+        st.markdown("**SERVICE LINES**")
+        st.dataframe(
+            pd.DataFrame(grouped["serviceLines"]),
+            use_container_width=True,
+            hide_index=True,
+        )
+    if grouped.get("provenance"):
+        with st.expander("Provenance ringkas"):
+            st.json(grouped["provenance"], expanded=False)
+    review = grouped.get("review") or {}
+    attention = review.get("needsAttention") or []
+    missing = review.get("missingFields") or []
+    if attention:
+        st.markdown("**Perlu perhatian**")
+        for item in attention:
+            st.warning(str(item))
+    if missing:
+        st.caption("Field wajib yang belum ditemukan: " + ", ".join(map(str, missing)))
+    usage = grouped.get("usage") or {}
+    if usage:
+        with st.expander("Usage LLM (per tahap)"):
+            st.json(usage, expanded=False)
+
+    with st.expander("JSON grouped lengkap (siap autofill editForm)"):
+        st.json(grouped, expanded=False)
 
 
 def _render_claim_form(claim_form: dict[str, Any]) -> None:
@@ -138,7 +213,7 @@ def _render_claim_form(claim_form: dict[str, Any]) -> None:
         st.markdown("**Finansial**")
         financial_columns = st.columns(4)
         financial_columns[0].metric(
-            "Amount incurred", f"{financial.get('amount_incurred') or 0:,}"
+            "Amount incurred", format_amount(financial.get("amount_incurred"))
         )
         financial_columns[1].metric(
             "Currency",
@@ -148,7 +223,9 @@ def _render_claim_form(claim_form: dict[str, Any]) -> None:
             "Exchange rate",
             f"{financial.get('exchange_rate')} ({financial.get('exchange_rate_status')})",
         )
-        financial_columns[3].metric("Total", f"{financial.get('total_amount') or 0:,}")
+        financial_columns[3].metric(
+            "Total", format_amount(financial.get("total_amount"))
+        )
         if financial.get("currency_status") == "default":
             st.caption(
                 "Mata uang dan kurs memakai default formulir (IDR, 1) karena "
@@ -903,12 +980,21 @@ if results:
 
     with json_tab:
         if docling_result and docling_result.get("status") == "success":
+            grouped = docling_result.get("grouped_claim_form") or (
+                docling_result.get("json_data", {}).get("grouped_claim_form")
+            )
+            if grouped:
+                if extraction:
+                    grouped = refresh_grouped_decisions(extraction, grouped)
+                _render_grouped_claim(grouped)
+                st.divider()
             claim_form = docling_result.get("claim_form") or (
                 docling_result.get("json_data", {}).get("claim_form")
             )
             if claim_form:
-                _render_claim_form(claim_form)
-            else:
+                with st.expander("Claim form lama (kompatibilitas)", expanded=False):
+                    _render_claim_form(claim_form)
+            if not grouped and not claim_form:
                 st.info(
                     "Claim form belum tersedia. Jalankan information extraction "
                     "untuk menghasilkan JSON ringkas."
@@ -1120,6 +1206,20 @@ if results:
                     "Information extraction tidak dijalankan, jadi prompt "
                     "extraction tidak tersedia."
                 )
+
+            st.markdown("**Business rules (1 pintu: ClaimRulebook)**")
+            try:
+                from schemas.claim_rulebook import rulebook_prompt_section
+
+                st.code(rulebook_prompt_section(), language="text")
+                with st.expander("JSON Schema rulebook (yang dikirim ke LLM)"):
+                    from schemas.claim_rulebook import DEFAULT_RULEBOOK
+
+                    st.json(
+                        DEFAULT_RULEBOOK.model_json_schema(), expanded=False
+                    )
+            except Exception as exc:
+                st.warning(f"Rulebook tidak dapat dimuat: {exc}")
 
     with download_tab:
         for download_index, result in enumerate(results):

@@ -1,0 +1,481 @@
+**Prompt [List every field with form, ID, name, and label | Try in Copilot Chat](https://m365.cloud.microsoft/chat/entity1-d870f6cd-4aa5-4d42-9626-ab690c041429/eyJpZCI6IlZYTmxjbFl4ZkdoMGRIQnpPaTh2YzNWaWMzUnlZWFJsTFdsdWRDNXZabVpwWTJVdVkyOXRMM3hQU1VRNllUQmhaVFUxWlRVdE5UYzVZUzAwTldGbUxXSTFaakl0TWprNU16QmlaREZpWkRSbGZHRTNNbUV3TUdRMUxUWXdOek10TkdWbU5pMWhPV0U1TFRZM05HVXdNR05rTkdRelkzd3lNREkyTFRFd0xUQXhWREEzT2pFeE9qTTJMamMyTWpFMk5UTmEiLCJzY2VuYXJpbyI6InNoYXJlTGlua1ZpYVJpY2hDb3B5IiwicHJvcGVydGllcyI6eyJwcm9tcHRTb3VyY2UiOiJ1c2VyIiwiY2xpY2tUaW1lc3RhbXAiOiIyMDI2LTEwLTAxVDA3OjExOjM2Ljk4NVoifSwiY2hhdFR5cGUiOiJ3ZWIiLCJ2ZXJzaW9uIjoxLjF9)**
+List every field with form, ID, name, and label
+**Response**
+Saya treat **field** sebagai elemen form yang membawa/menampilkan data, terutama `input`, `select`, `textarea`, termasuk hidden field. Saya **tidak memasukkan button, link, dan kolom table**, dan untuk field tanpa label eksplisit saya tandai `Hidden`, `No explicit label`, atau saya kaitkan ke label visual terdekat. Semua berasal dari [tes.txt](https://generalicoid-my.sharepoint.com/personal/satriow_generali_co_id/Documents/Microsoft%20Copilot%20Chat%20Files/tes.txt?EntityRepresentationId=bb384ca3-2d77-45e4-836f-b1c71de93db4).
+
+## 1. `editForm`
+
+| Form     | ID                     | Name                   | Label                          |
+| -------- | ---------------------- | ---------------------- | ------------------------------ |
+| editForm | `submitInd`            | `submitInd`            | Hidden                         |
+| editForm | `giclKy`               | `giclKy`               | Hidden                         |
+| editForm | `clbcKy`               | `clbcKy`               | Hidden                         |
+| editForm | `clapKy`               | `clapKy`               | Hidden                         |
+| editForm | `papaKy`               | `papaKy`               | Hidden                         |
+| editForm | `gpgpKy`               | `gpgpKy`               | Hidden                         |
+| editForm | `memeKy`               | `memeKy`               | Hidden                         |
+| editForm | `insuredName`          | `insuredName`          | INSURED NAME                   |
+| editForm | `missMemeInd`          | `missMemeInd`          | MEMBER NOT FOUND               |
+| editForm | `erroeTpaInd`          | `erroeTpaInd`          | ERROR ADMEDIKA                 |
+| editForm | `dob`                  | `dob`                  | DOB                            |
+| editForm | `sendOutInd`           | `sendOutInd`           | SMS/EMAIL SEND OUT             |
+| editForm | `erroeInternalInd`     | `erroeInternalInd`     | ERROR INTERNAL                 |
+| editForm | `clientNo`             | `clientNo`             | CLIENT NO                      |
+| editForm | `email`                | `email`                | EMAIL                          |
+| editForm | `telephone`            | `telephone`            | TELEPHONE                      |
+| editForm | `address`              | `address`              | ADDRESS                        |
+| editForm | `watchlistClintInd`    | `watchlistClintInd`    | WATCHLIST CLIENT               |
+| editForm | `watchlistProviderInd` | `watchlistProviderInd` | WATCHLIST PROVIDER             |
+| editForm | `mobilePhone`          | `mobilePhone`          | MOBILE PHONE                   |
+| editForm | `sysvClaimType`        | `sysvClaimType`        | CLAIM TYPE                     |
+| editForm | `sysvPayeeType`        | `sysvPayeeType`        | PAYEE TYPE                     |
+| editForm | `claiAiAsses`          | `claiAiAsses`          | Risk Category                  |
+| editForm | `claiAiAssesPercent`   | `claiAiAssesPercent`   | Risk Percentage                |
+| editForm | `claiUsAssesDesc`      | `claiUsAssesDesc`      | Analyst Assesment              |
+| editForm | `claiUsusId`           | `claiUsusId`           | Assesment by                   |
+| editForm | `accountNo`            | `accountNo`            | ACCOUNT NO                     |
+| editForm | `refundAccountNo`      | `refundAccountNo`      | REFUND ACCOUNT NO              |
+| editForm | `subClaimNo`           | `subClaimNo`           | SUB CLAIM NO                   |
+| editForm | `subClaimNoHidden`     | `subClaimNoHidden`     | Hidden SUB CLAIM NO            |
+| editForm | `accountName`          | `accountName`          | ACCOUNT NAME                   |
+| editForm | `refundAccountName`    | `refundAccountName`    | REFUND ACCOUNT NAME            |
+| editForm | *(none)*               | `caseNo`               | CASE NO                        |
+| editForm | `payBankName`          | `bankIdDesc`           | BANK NAME                      |
+| editForm | `payBankId`            | `bankId`               | Hidden BANK ID                 |
+| editForm | `refundBankName`       | `refundBankIdDesc`     | REFUND BANK NAME               |
+| editForm | `refundBankId`         | `refundBankId`         | Hidden REFUND BANK ID          |
+| editForm | `sysvGiclStsDesc`      | `sysvGiclStsDesc`      | STATUS                         |
+| editForm | `sysvGiclSts`          | `sysvGiclSts`          | Hidden STATUS                  |
+| editForm | `payBankBranchName`    | `bankBranchName`       | BRANCH                         |
+| editForm | `refundBankBranchName` | `refundBranchName`     | REFUND BRANCH                  |
+| editForm | *(none)*               | `preCertNo`            | PRECERT NO                     |
+| editForm | `receivedDtm`          | `receivedDtm`          | RECEIVED DATE                  |
+| editForm | `submitDtm`            | `submitDtm`            | SUBMIT DATE                    |
+| editForm | `exchangeRateDtm`      | `exchangeRateDtm`      | EXCHANGE RATE DATE             |
+| editForm | `typeOfVisit`          | `typeOfVisit`          | TYPE OF VISIT                  |
+| editForm | `accidentDtm`          | `accidentDtm`          | ACCIDENT DATE                  |
+| editForm | `sysvCurrencyType`     | `sysvCurrencyType`     | CURRENCY                       |
+| editForm | `exchangeRate`         | `exchangeRate`         | EXCHANGE RATE                  |
+| editForm | `visitFrmDtm`          | `visitFrmDtm`          | HOSPITALIZATION DATE FROM      |
+| editForm | `visitToDtm`           | `visitToDtm`           | HOSPITALIZATION DATE TO        |
+| editForm | `noOfDays`             | `noOfDays`             | DAYS                           |
+| editForm | `bypassClmExpiryDate`  | `bypassClmExpiryDate`  | BYPASS EXPIRY DATE             |
+| editForm | `addHphpName`          | `hphpName`             | HOSPITAL NAME                  |
+| editForm | `addHospital`          | `hphpId`               | HOSPITAL CODE                  |
+| editForm | `sysvDiscountTypeDesc` | `sysvDiscountTypeDesc` | DISCOUNT TYPE                  |
+| editForm | `sysvDiscountType`     | `sysvDiscountType`     | Hidden DISCOUNT TYPE           |
+| editForm | `orgDiscountAmt`       | `orgDiscountAmt`       | ORIGINAL DISCOUNT AMOUNT       |
+| editForm | `discountAmt`          | `discountAmt`          | DISCOUNT AMOUNT                |
+| editForm | `invoiceNo`            | `invoiceNo`            | PRVD INV NO                    |
+| editForm | `doctorName`           | `hpspName`             | DOCTOR NAME                    |
+| editForm | `hpspKy`               | `hpspKy`               | Doctor key / no explicit label |
+| editForm | `sysvCobId`            | `sysvCobId`            | OTHER INSURANCE CO             |
+| editForm | `reasonOfVists`        | `reasonOfVists`        | REASON OF VISIT                |
+| editForm | `preExistingInd`       | `preExistingInd`       | PRE-EXISTING                   |
+| editForm | *(none)*               | `cobAmt`               | OTHER INSURANCE PAY(IDR)       |
+| editForm | `firstDiagnosisCode`   | `icdCode1`             | ICD CODE 1                     |
+| editForm | `thirdDiagnosisCode`   | `icdCode3`             | Hidden ICD CODE 3              |
+| editForm | `secondDiagnosisCode`  | `icdCode2`             | ICD CODE 2                     |
+| editForm | `firstDiagnosisDesc`   | `icdCode1Desc`         | ICD CODE 1 Description         |
+| editForm | `secondDiagnosisDesc`  | `icdCode2Desc`         | ICD CODE 2 Description         |
+| editForm | *(none)*               | `internalRemark`       | REMARK INTERNAL                |
+| editForm | *(none)*               | `prorateAmt`           | R\&B AMOUNT PRORATE            |
+| editForm | *(none)*               | `incuredAmt`           | AMOUNT INCURRED                |
+| editForm | `incuredIdrAmt`        | `incuredIdrAmt`        | IDR                            |
+| editForm | `sysvSourceType`       | `sysvSourceType`       | SOURCE TYPE                    |
+| editForm | `tpaCode`              | `tpaCode`              | Hidden TPA CODE                |
+| editForm | `claimTpa`             | `claimTpa`             | CLAIM NO TPA                   |
+| editForm | `fastDischarge`        | `fastDischarge`        | FAST DISCHARGE                 |
+| editForm | `moreVisitInd`         | `moreVisitInd`         | MORE VISIT IND                 |
+
+***
+
+## 2. `detailForm1`
+
+| Form        | ID       | Name                    | Label                             |
+| ----------- | -------- | ----------------------- | --------------------------------- |
+| detailForm1 | *(none)* | `policyStatus`          | POLICY STATUS                     |
+| detailForm1 | *(none)* | `agentName`             | AGENT NAME                        |
+| detailForm1 | *(none)* | `policyHolder`          | POLICY HOLDER                     |
+| detailForm1 | *(none)* | `agentNo`               | AGENT NO                          |
+| detailForm1 | *(none)* | `effectiveDate`         | EFFECTIVE DATE                    |
+| detailForm1 | *(none)* | `policyAge`             | POLICY AGE                        |
+| detailForm1 | *(none)* | `salesAgency`           | SALES AGENCY                      |
+| detailForm1 | *(none)* | `effectiveRider`        | EFFECTIVE RIDER                   |
+| detailForm1 | *(none)* | `rideAge`               | RIDER AGE                         |
+| detailForm1 | *(none)* | `reinstateDate`         | REINSTATE DATE                    |
+| detailForm1 | *(none)* | `reinstatePolicyAge`    | REINSTATE POLICY AGE              |
+| detailForm1 | *(none)* | `givtForeignAmt`        | AMOUNT INCURRED                   |
+| detailForm1 | *(none)* | `givtIdrAmt`            | IDR                               |
+| detailForm1 | *(none)* | `excessForeignAmt`      | EXCESS PAID BY CUSTOMER           |
+| detailForm1 | *(none)* | `excessIdrAmt`          | IDR                               |
+| detailForm1 | *(none)* | `benefitAmt`            | ELIGIBLE BENEFIT IDR              |
+| detailForm1 | *(none)* | `outOfPocketAmt`        | FINAL EXCESS AMOUNT               |
+| detailForm1 | *(none)* | `cobPaidAmt`            | COB PAID AMOUNT                   |
+| detailForm1 | *(none)* | `sysvDiscountType`      | DISCOUNT TYPE                     |
+| detailForm1 | *(none)* | `orgDiscountAmt`        | ORIGINAL DISCOUNT AMOUNT          |
+| detailForm1 | *(none)* | `discountAmt`           | DISCOUNT AMOUNT                   |
+| detailForm1 | *(none)* | `refundAmt`             | REFUND IDR                        |
+| detailForm1 | *(none)* | `finalRefundAmt`        | TOTAL APPROVE AMOUNT TO CUSTOMER  |
+| detailForm1 | *(none)* | `payToProviderAmt`      | PAY TO PROVIDER IDR               |
+| detailForm1 | *(none)* | `finalPayToProviderAmt` | TOTAL APPROVE AMOUNT TO PROVIDER  |
+| detailForm1 | *(none)* | `tpaRefundAmt`          | TPA REFUND IDR                    |
+| detailForm1 | *(none)* | `tpaPayToProviderAmt`   | APPROVE AMOUNT BY TPA TO PROVIDER |
+
+## 3. `detailForm2`
+
+| Form        | ID       | Name                    | Label                     |
+| ----------- | -------- | ----------------------- | ------------------------- |
+| detailForm2 | *(none)* | `policyStatus`          | POLICY STATUS             |
+| detailForm2 | *(none)* | `agentName`             | AGENT NAME                |
+| detailForm2 | *(none)* | `policyHolder`          | POLICY HOLDER             |
+| detailForm2 | *(none)* | `agentNo`               | AGENT NO                  |
+| detailForm2 | *(none)* | `effectiveDate`         | EFFECTIVE DATE            |
+| detailForm2 | *(none)* | `policyAge`             | POLICY AGE                |
+| detailForm2 | *(none)* | `salesAgency`           | SALES AGENCY              |
+| detailForm2 | *(none)* | `effectiveRider`        | EFFECTIVE RIDER           |
+| detailForm2 | *(none)* | `rideAge`               | RIDER AGE                 |
+| detailForm2 | *(none)* | `reinstateDate`         | REINSTATE DATE            |
+| detailForm2 | *(none)* | `reinstatePolicyAge`    | REINSTATE POLICY AGE      |
+| detailForm2 | *(none)* | `givtForeignAmt`        | AMOUNT INCURRED           |
+| detailForm2 | *(none)* | `givtIdrAmt`            | IDR                       |
+| detailForm2 | *(none)* | `excessForeignAmt`      | EXCESS PAID BY CUSTOMER   |
+| detailForm2 | *(none)* | `excessIdrAmt`          | IDR                       |
+| detailForm2 | *(none)* | `benefitAmt`            | ELIGIBLE BENEFIT IDR      |
+| detailForm2 | *(none)* | `outOfPocketAmt`        | MEMBER OUT OF POCKET IDR  |
+| detailForm2 | *(none)* | `cobPaidAmt`            | COB PAID AMOUNT           |
+| detailForm2 | *(none)* | `sysvDiscountType`      | DISCOUNT TYPE             |
+| detailForm2 | *(none)* | `orgDiscountAmt`        | ORIGINAL DISCOUNT AMOUNT  |
+| detailForm2 | *(none)* | `discountAmt`           | DISCOUNT AMOUNT           |
+| detailForm2 | *(none)* | `refundAmt`             | REFUND IDR                |
+| detailForm2 | *(none)* | `finalRefundAmt`        | FINAL REFUND IDR          |
+| detailForm2 | *(none)* | `payToProviderAmt`      | PAY TO PROVIDER IDR       |
+| detailForm2 | *(none)* | `finalPayToProviderAmt` | FINAL PAY TO PROVIDER IDR |
+| detailForm2 | *(none)* | `tpaRefundAmt`          | TPA REFUND IDR            |
+| detailForm2 | *(none)* | `tpaPayToProviderAmt`   | TPA PAY TO PROVIDER IDR   |
+
+***
+
+## 4. `groupQueryform`
+
+| Form           | ID             | Name           | Label      |
+| -------------- | -------------- | -------------- | ---------- |
+| groupQueryform | `hiddenGp`     | *(none)*       | Hidden     |
+| groupQueryform | `gpgpId`       | `gpgpId`       | GROUP ID   |
+| groupQueryform | `gpgpName`     | `gpgpName`     | GROUP NAME |
+| groupQueryform | `sysvGpgpType` | `sysvGpgpType` | GROUP TYPE |
+
+## 5. `assurerform`
+
+| Form        | ID                  | Name            | Label                |
+| ----------- | ------------------- | --------------- | -------------------- |
+| assurerform | `queryMemeGpgpName` | `gpgpName`      | GROUP NAME           |
+| assurerform | `queryMemeGpgpKy`   | `gpgpKy`        | Hidden GROUP KEY     |
+| assurerform | `memeName`          | `memeName`      | MEMBER NAME          |
+| assurerform | `memeCertIdNum`     | `memeCertIdNum` | CERT ID NO           |
+| assurerform | *(none)*            | `subPolicyId`   | INDIVIDUAL POLICY NO |
+| assurerform | *(none)*            | `memeClientId`  | CLIENT MEMBER ID     |
+
+## 6. `queryformHospital`
+
+| Form              | ID              | Name       | Label         |
+| ----------------- | --------------- | ---------- | ------------- |
+| queryformHospital | `queryHphpId`   | `hphpId`   | PROVIDER ID   |
+| queryformHospital | `queryHphpName` | `hphpName` | PROVIDER NAME |
+
+## 7. `querydiagnosticform`
+
+| Form                | ID         | Name       | Label          |
+| ------------------- | ---------- | ---------- | -------------- |
+| querydiagnosticform | `dadaId`   | `dadaId`   | DIAGNOSIS CODE |
+| querydiagnosticform | `dadaDesc` | `dadaDesc` | DIAGNOSIS DESC |
+
+***
+
+## 8. `queryBankform`
+
+| Form          | ID            | Name          | Label     |
+| ------------- | ------------- | ------------- | --------- |
+| queryBankform | `hiddenBk`    | *(none)*      | Hidden    |
+| queryBankform | *(none)*      | `bkbkId`      | BANK ID   |
+| queryBankform | `sysvPntBkbk` | `sysvPntBkbk` | BANK HQ   |
+| queryBankform | *(none)*      | `bkbkName`    | BANK NAME |
+
+## 9. `queryDoctorForm`
+
+| Form            | ID                 | Name            | Label              |
+| --------------- | ------------------ | --------------- | ------------------ |
+| queryDoctorForm | `hpspName`         | `hpspName`      | NAME OF MP         |
+| queryDoctorForm | `sysvHpspClass`    | `sysvHpspClass` | MP CLASS           |
+| queryDoctorForm | `sysvSpecType1`    | `sysvSpecType1` | DEPT               |
+| queryDoctorForm | `doctorListHphpId` | `hphpId`        | Hidden PROVIDER ID |
+
+## 10. `zlmform`
+
+| Form    | ID                 | Name            | Label                   |
+| ------- | ------------------ | --------------- | ----------------------- |
+| zlmform | `zmlDialogIdnFlag` | `idnFlag`       | Hidden                  |
+| zlmform | `spspId`           | `spspId`        | SERVICE PROC CD         |
+| zlmform | `sysvSpspType`     | `sysvSpspType`  | SERVICE PROCEDURE TYPE  |
+| zlmform | `sysvSpspLevel`    | `sysvSpspLevel` | SERVICE PROCEDURE LEVEL |
+| zlmform | `spspDesc`         | `spspDesc`      | SERV PROC DESC          |
+
+***
+
+## 11. `feedbackForm`
+
+| Form         | ID                     | Name                | Label           |
+| ------------ | ---------------------- | ------------------- | --------------- |
+| feedbackForm | `id`                   | `id`                | Hidden          |
+| feedbackForm | `addMemeKy`            | `memeKy`            | Hidden          |
+| feedbackForm | `addPspsKy`            | `pspsKy`            | Hidden          |
+| feedbackForm | `addGpgpKy`            | `gpgpKy`            | Hidden          |
+| feedbackForm | `addClapKy`            | `clapKy`            | Hidden          |
+| feedbackForm | `addGifrKy`            | `gifrKy`            | MSG ID          |
+| feedbackForm | `addClaimNo`           | `claimNo`           | CLAIM NO        |
+| feedbackForm | `addMemeName`          | `memeName`          | MEMBER NAME     |
+| feedbackForm | `addIncurredAmt`       | `incurredAmt`       | INCURRED AMT    |
+| feedbackForm | `addReceivedDtm`       | `receivedDtm`       | RECEIVE DATE    |
+| feedbackForm | `addGifrFeedbackDtm`   | `gifrFeedbackDtm`   | FEEDBACK DATE   |
+| feedbackForm | `addGifrReplayDtm`     | `gifrReplayDtm`     | REPLY DATE      |
+| feedbackForm | `addGifrFeedbackReson` | `gifrFeedbackReson` | FEEDBACK REASON |
+| feedbackForm | `addGifrFeedbackNotes` | `gifrFeedbackNotes` | FEEDBACK NOTES  |
+| feedbackForm | `addGifrReplay`        | `gifrReplay`        | REPLY           |
+
+## 12. `imgform`
+
+| Form    | ID                       | Name               | Label                  |
+| ------- | ------------------------ | ------------------ | ---------------------- |
+| imgform | `addImgClimKy`           | `climKy`           | Hidden                 |
+| imgform | `addImgClapKy`           | `clapKy`           | Hidden                 |
+| imgform | `addImgClbcKy`           | `clbcKy`           | Hidden                 |
+| imgform | `addImgClimNamePath`     | `climNamePath`     | Hidden                 |
+| imgform | `addImgGiddKy`           | `giddKy`           | Hidden                 |
+| imgform | `addImgGidcKy`           | `gidcKy`           | Hidden                 |
+| imgform | `addImgSysvDocumentType` | `sysvDocumentType` | Hidden                 |
+| imgform | `addSysvClimType`        | `sysvClimType`     | IMAGE LEVEL            |
+| imgform | `addCertTypeDesc`        | `certTypeDesc`     | Hidden IMAGE TYPE DESC |
+| imgform | `addCertType`            | `certType`         | IMAGE TYPE             |
+| imgform | `addClimComment`         | `climComment`      | REMARK                 |
+| imgform | `imageAddUploadMethod`   | `uploadMethod`     | UPLOAD TYPE            |
+| imgform | `imageAddFile`           | `image`            | IMAGE CHOOSE           |
+
+***
+
+# 13. `queryImgform` (OPEN IMAGES)
+
+| Form         | ID                       | Name               | Label       |
+| ------------ | ------------------------ | ------------------ | ----------- |
+| queryImgform | `queryImgClKy`           | `clKy`             | Hidden      |
+| queryImgform | `queryImgClapKy`         | `clapKy`           | Hidden      |
+| queryImgform | `queryImgClbcKy`         | `clbcKy`           | Hidden      |
+| queryImgform | `queryImgClvtKy`         | `clvtKy`           | Hidden      |
+| queryImgform | `queryImgGidcKy`         | `gidcKy`           | Hidden      |
+| queryImgform | `idnImgSysvDocumentType` | `sysvDocumentType` | IMAGE LEVEL |
+
+***
+
+# 14. `hospitalAddForm`
+
+This is one of the largest forms.
+
+| Form            | ID                     | Name                | Label                      |
+| --------------- | ---------------------- | ------------------- | -------------------------- |
+| hospitalAddForm | `addHphpId`            | `hphpId`            | Hidden PROVIDER ID         |
+| hospitalAddForm | `addRefInd`            | `refInd`            | AFFILIATED IND             |
+| hospitalAddForm | `addrefHphpIdName`     | `refHphpIdName`     | AFFILIATED TO              |
+| hospitalAddForm | `addrefHphpId`         | `refHphpId`         | Hidden AFFILIATED PROVIDER |
+| hospitalAddForm | `addSysvHphpClass`     | `sysvHphpClass`     | PROVIDER CLASS             |
+| hospitalAddForm | `addSysvHphpSubClass`  | `sysvHphpSubClass`  | SUBCLASS                   |
+| hospitalAddForm | `addSysvHphpType`      | `sysvHphpType`      | PROVIDER TYPE              |
+| hospitalAddForm | `addHphpShipInd`       | `hphpShipInd`       | BLACK LIST                 |
+| hospitalAddForm | `addhppnId`            | `hppnId`            | PAR PROVIDER ID            |
+| hospitalAddForm | `addhppnName`          | `hppnName`          | PAR PROVIDER NM            |
+| hospitalAddForm | `addHphpNhi`           | `hphpNhi`           | NATL HEALTH CD             |
+| hospitalAddForm | `addHphpName`          | `hphpName`          | PROVIDER NAME              |
+| hospitalAddForm | `addHphpOthName`       | `hphpOthName`       | ALTERNATIVE NM             |
+| hospitalAddForm | `addTaxId`             | `taxId`             | VAT NO                     |
+| hospitalAddForm | `addshshName`          | `shshName`          | SHIP REGION                |
+| hospitalAddForm | `addshshKy`            | `shshKy`            | Hidden SHIP REGION KEY     |
+| hospitalAddForm | `addEnttLangId1`       | `enttLangId1`       | LANGUAGE 1                 |
+| hospitalAddForm | `addEnttLangId2`       | `enttLangId2`       | LANGUAGE 2                 |
+| hospitalAddForm | `addEnttLangId3`       | `enttLangId3`       | LANGUAGE 3                 |
+| hospitalAddForm | `addSysvHphpClSts`     | `sysvHphpClSts`     | CLAIM STATUS               |
+| hospitalAddForm | `addHphpPayHoldDt`     | `hphpPayHoldDt`     | CLAIM PEND DT              |
+| hospitalAddForm | `addHphpPreauthInd`    | `hphpPreauthInd`    | PREAUTH IND                |
+| hospitalAddForm | `addHphpEftInd`        | `hphpEftInd`        | EFT                        |
+| hospitalAddForm | `addHphpAddr`          | `hphpAddr`          | ADDRESS IN CHI             |
+| hospitalAddForm | `addHphpAddrEng`       | `hphpAddrEng`       | ADDRESS IN ENG             |
+| hospitalAddForm | `addhphpScctIdDesc`    | `hphpScctIdDesc`    | DOMESTIC REGION            |
+| hospitalAddForm | `addHphpScctId`        | `hphpScctId`        | Hidden DOMESTIC REGION     |
+| hospitalAddForm | `addHphpZip`           | `hphpZip`           | ZIP CODE                   |
+| hospitalAddForm | `addHphpEmail`         | `hphpEmail`         | EMAIL                      |
+| hospitalAddForm | `addHphpFrnScctIdDesc` | `hphpFrnScctIdDesc` | INTL REGION                |
+| hospitalAddForm | `addHphpFrnScctId`     | `hphpFrnScctId`     | Hidden INTL REGION         |
+| hospitalAddForm | `addHphpWebsit`        | `hphpWebsit`        | WEBSITE                    |
+| hospitalAddForm | `addHphpPhone`         | `hphpPhone`         | PHONE                      |
+| hospitalAddForm | `addHphpFax`           | `hphpFax`           | FAX                        |
+| hospitalAddForm | `addHphpContactName`   | `hphpContactName`   | CONTACT                    |
+| hospitalAddForm | `addHphpBankId`        | `bkbkId`            | BANK ID                    |
+| hospitalAddForm | `addSysvBkbkType`      | `sysvBkbkType`      | BANK ACCT TYPE             |
+| hospitalAddForm | `addHphpAcctNo`        | `hphpAcctNo`        | ACCOUNT NO                 |
+| hospitalAddForm | `addHphpAcctName`      | `hphpAcctName`      | ACCOUNT NAME               |
+| hospitalAddForm | `addHphpAcctConfmDt`   | `hphpAcctConfmDt`   | BANK CFM DATE              |
+| hospitalAddForm | `addhphpComment`       | `hphpComment`       | REMARK                     |
+
+***
+
+# 15. Other search forms
+
+### `medicalForm`
+
+| ID              | Name       | Label           |
+| --------------- | ---------- | --------------- |
+| `glasshppnId`   | `hppnId`   | PAR PROVIDER ID |
+| `glasshppnName` | `hppnName` | PAR PROVIDER NM |
+
+### `hospmanaQueryform`
+
+| ID              | Name            | Label           |
+| --------------- | --------------- | --------------- |
+| `hphpId`        | `hphpId`        | PROVIDER ID     |
+| `sysvHphpClass` | `sysvHphpClass` | PROVIDER CLASS  |
+| `sysvHphpType`  | `sysvHphpType`  | PROVIDER TYPE   |
+| `hphpName`      | `hphpName`      | PROVIDER NAME   |
+| *(none)*        | `hphpScctId`    | DOMESTIC REGION |
+
+### `shipForm`
+
+| ID         | Name       | Label                           |
+| ---------- | ---------- | ------------------------------- |
+| *(none)*   | *(none)*   | SHIP TYPE, fixed readonly value |
+| `shshName` | `shshName` | SHIP REGION                     |
+
+### `regionForm`
+
+| ID         | Name        | Label       |
+| ---------- | ----------- | ----------- |
+| *(none)*   | `scctPvAbv` | Hidden      |
+| `scctId`   | `scctId`    | REGION CODE |
+| `scctName` | `scctName`  | REGION      |
+
+***
+
+# 16. `doctorAddForm`
+
+| Form          | ID                 | Name            | Label      |
+| ------------- | ------------------ | --------------- | ---------- |
+| doctorAddForm | `addDoctorHpspKy`  | `hpspKy`        | Hidden     |
+| doctorAddForm | `addDoctorHpdpKy`  | `hpdpKy`        | Hidden     |
+| doctorAddForm | `addDoctorHphpId`  | `hphpId`        | Hidden     |
+| doctorAddForm | `addhpspName`      | `hpspName`      | NAME OF MP |
+| doctorAddForm | `addsysvHpspClass` | `sysvHpspClass` | MP CLASS   |
+| doctorAddForm | `addsysvSpecType1` | `sysvSpecType1` | DEPT 1     |
+| doctorAddForm | `addsysvSpecType2` | `sysvSpecType2` | DEPT 2     |
+| doctorAddForm | `addsysvSpecType3` | `sysvSpecType3` | DEPT 3     |
+| doctorAddForm | `addhpspComment`   | `hpspComment`   | REMARK     |
+
+***
+
+# 17. `claim-assesment-form`
+
+| Form                 | ID            | Name          | Label     |
+| -------------------- | ------------- | ------------- | --------- |
+| claim-assesment-form | `claiUsAsses` | `claiUsAsses` | Assesment |
+| claim-assesment-form | `hiddenBk`    | *(none)*      | Hidden    |
+
+## 18. `claimQaCfrForm`
+
+| Form           | ID              | Name            | Label           |
+| -------------- | --------------- | --------------- | --------------- |
+| claimQaCfrForm | `clqaDecision`  | `clqaDecision`  | QA CFR Decision |
+| claimQaCfrForm | `clqaReason`    | `clqaReason`    | QA CFR Reason   |
+| claimQaCfrForm | `clqaSubmitDtm` | `clqaSubmitDtm` | QA CFR Date     |
+| claimQaCfrForm | `clqaUsusName`  | `clqaUsusName`  | QA CFR User     |
+
+***
+
+# 19. `cmtform`
+
+| Form    | ID                       | Name                | Label                  |
+| ------- | ------------------------ | ------------------- | ---------------------- |
+| cmtform | `addImgClimKy`           | `climKy`            | Hidden                 |
+| cmtform | `addImgClapKy`           | `clapKy`            | Hidden                 |
+| cmtform | `addImgClbcKy`           | `clbcKy`            | Hidden                 |
+| cmtform | `addImgClimNamePath`     | `climNamePath`      | Hidden                 |
+| cmtform | `addImgGiddKy`           | `giddKy`            | Hidden                 |
+| cmtform | `addImgGidcKy`           | `gidcKy`            | Hidden                 |
+| cmtform | `addImgSysvDocumentType` | `sysvDocumentType`  | Hidden                 |
+| cmtform | `regNoCmt`               | `regNoCmt`          | Registration No        |
+| cmtform | `regNoCmtHidden`         | `regNoCmtHidden`    | Hidden Registration No |
+| cmtform | `claimNoCmt`             | `claimNoCmt`        | Claim No               |
+| cmtform | `claimNoCmtHidden`       | `claimNoCmtHidden`  | Hidden Claim No        |
+| cmtform | `addDocumentId`          | `documentId`        | Document ID            |
+| cmtform | `addAuthenticationDoc`   | `authenticationDoc` | Authentication         |
+| cmtform | `addRemarkDoc`           | `remarkDoc`         | REMARK                 |
+| cmtform | `addDocFile`             | `cmtFile`           | File                   |
+
+***
+
+# 20. Second `queryImgform` (List Document CMT)
+
+This is important because the same form ID is reused.
+
+| Form         | ID               | Name     | Label  |
+| ------------ | ---------------- | -------- | ------ |
+| queryImgform | `queryImgClKy`   | `clKy`   | Hidden |
+| queryImgform | `queryImgClapKy` | `clapKy` | Hidden |
+| queryImgform | `queryImgClbcKy` | `clbcKy` | Hidden |
+| queryImgform | `queryImgClvtKy` | `clvtKy` | Hidden |
+| queryImgform | `queryImgGidcKy` | `gidcKy` | Hidden |
+
+***
+
+# 21. `cmtdialogform`
+
+| Form          | ID               | Name     | Label  |
+| ------------- | ---------------- | -------- | ------ |
+| cmtdialogform | `queryImgClKy`   | `clKy`   | Hidden |
+| cmtdialogform | `queryImgClapKy` | `clapKy` | Hidden |
+| cmtdialogform | `queryImgClbcKy` | `clbcKy` | Hidden |
+| cmtdialogform | `queryImgClvtKy` | `clvtKy` | Hidden |
+| cmtdialogform | `queryImgGidcKy` | `gidcKy` | Hidden |
+
+Note that `cmtdialogform` itself is nested inside `cmtForm`, which is invalid HTML form nesting.
+
+***
+
+## Forms with no normal `input/select/textarea` fields
+
+The following forms exist but don't contain conventional data-entry fields in the static HTML:
+
+* `documentumForm`
+* `docForm`
+* `queryform` for FEEDBACK HISTORY
+* `qcForm`, because its fields appear intended to be dynamically inserted into `#componentQc`
+* `cmtForm`, its apparent fields belong to nested `cmtdialogform`
+
+***
+
+## Important: fields outside any `<form>`
+
+There are also fields in the page that **do not belong to a form**:
+
+| Form | ID                     | Name         | Label / Purpose         |
+| ---- | ---------------------- | ------------ | ----------------------- |
+| NONE | `hidUsusName`          | *(none)*     | Hidden username         |
+| NONE | `edit`                 | `edit`       | Hidden edit/claim key   |
+| NONE | `copy`                 | `copy`       | Hidden copy             |
+| NONE | `stthId`               | `stthId`     | Hidden                  |
+| NONE | `occr`                 | `occr`       | Hidden                  |
+| NONE | `taskStatus`           | `taskStatus` | Hidden                  |
+| NONE | `entryForAmtSum`       | *(none)*     | AMOUNT INCURRED         |
+| NONE | `entryIdrAmtSum`       | *(none)*     | IDR                     |
+| NONE | `entryExcessForAmtSum` | *(none)*     | EXCESS PAID BY CUSTOMER |
+| NONE | `entryExcessIdrAmtSum` | *(none)*     | IDR                     |
+| NONE | `visitDetailTotal`     | *(none)*     | TOTAL                   |
+| NONE | `textAreaClaimNotes`   | *(none)*     | ADD NOTES               |
+
+### Important observation
+
+There are quite a few fields where **`name` exists but `id` does not**, especially in `editForm` and both `detailForm`s. There are also **duplicate IDs**, particularly `queryImgClKy`, `queryImgClapKy`, `queryImgClbcKy`, `queryImgClvtKy`, `queryImgGidcKy`, `formuser`, and `queryImgform`. This matters if the JavaScript accesses fields using `$('#id')`, because it can target the wrong element.

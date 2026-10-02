@@ -25,17 +25,50 @@ Design rules:
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from typing import Any, Iterable, Mapping, Sequence
 
+from services.assessment_service import derive_claim_analysis
 from services.claim_rules import (
     document_title,
     visit_type_from_documents,
 )
 
 CLAIM_FORM_VERSION = "claim-form-v1"
+CLAIM_GROUPED_VERSION = "claim-full-v2"
 DEFAULT_CURRENCY = "IDR"
 DEFAULT_EXCHANGE_RATE = 1
+
+# Key JSON grouped = ``name`` di editForm agar autofill $('#name') 1:1.
+# Value = kandidat field kontrak (snake_case) berurutan prioritas.
+FORM_NAME_ALIASES: dict[str, tuple[str, ...]] = {
+    "insuredName": ("patient_name", "policy_holder_name"),
+    "policyHolder": ("policy_holder_name",),
+    "clientNo": ("client_no", "member_number", "patient_id"),
+    "dob": ("date_of_birth",),
+    "mobilePhone": ("mobile_phone",),
+    "email": ("email",),
+    "telephone": ("telephone",),
+    "address": ("address",),
+    "sysvClaimType": ("claim_type",),
+    "sysvPayeeType": ("payee_type",),
+    "hphpName": ("provider_name",),
+    "hphpId": ("provider_code",),
+    "reasonOfVists": ("reason_of_visit",),
+    "icdCode1": ("icd_code_1",),
+    "icdCode2": ("icd_code_2",),
+    "visitFrmDtm": ("admission_date", "hospitalization_date"),
+    "visitToDtm": ("discharge_date", "hospitalization_date"),
+    "noOfDays": ("no_of_days",),
+    "incuredAmt": ("total_amount", "amount_incurred"),
+    "sysvCurrencyType": ("currency",),
+    "exchangeRate": ("exchange_rate",),
+    "exchangeRateDtm": ("exchange_rate_date",),
+    "subClaimNo": ("sub_claim_no",),
+    "caseNo": ("case_no",),
+    "typeOfVisit": ("visit_type",),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +93,110 @@ def _first(*values: Any) -> Any:
         if value not in (None, "", []):
             return value
     return None
+
+
+def apply_document_claim_type(
+    contract: Mapping[str, Any],
+    pages: Sequence[Mapping[str, Any]] | None,
+    classifications: Sequence[Mapping[str, Any]] | None,
+) -> dict[str, Any]:
+    """Derive claim stage from named document pages when the inventory permits it."""
+    page_classifications = {
+        str(item.get("page")): item
+        for item in classifications or []
+        if isinstance(item, Mapping) and item.get("page") is not None
+    }
+    page_documents: list[tuple[Mapping[str, Any], Mapping[str, Any]]] = []
+    for page in pages or []:
+        classification = page_classifications.get(str(page.get("page_number")))
+        if classification is not None:
+            page_documents.append((page, classification))
+
+    def is_named(classification: Mapping[str, Any]) -> bool:
+        return bool(str(classification.get("document_type") or "").strip()) and (
+            classification.get("source") != "not_named"
+        )
+
+    def is_new_document(classification: Mapping[str, Any]) -> bool:
+        document_type = " ".join(
+            str(classification.get(key) or "")
+            for key in ("document_type", "label", "title")
+        ).lower()
+        return (
+            classification.get("category") == "formulir_klaim"
+            or re.search(r"\bskd\b", document_type) is not None
+            or "surat keterangan dokter" in document_type
+            or "formulir" in document_type
+        )
+
+    new_documents = [
+        (page, classification)
+        for page, classification in page_documents
+        if is_new_document(classification)
+        and (
+            is_named(classification)
+            or classification.get("category") == "formulir_klaim"
+        )
+    ]
+    inventory_complete = bool(pages) and len(page_documents) == len(pages) and all(
+        is_named(classification) for _, classification in page_documents
+    )
+
+    analysis = dict(contract.get("analyst_analysis") or {})
+    current_claim_case = dict(analysis.get("claim_case_type") or {})
+    current_value = current_claim_case.get("value")
+    if new_documents:
+        claim_value = "new"
+        evidence = [
+            str(classification.get("document_type") or classification.get("category"))
+            for _, classification in new_documents
+        ]
+        evidence_refs = [str(page.get("page_number")) for page, _ in new_documents]
+        reason = "Dokumen SKD atau formulir klaim ditemukan; kategori klaim adalah new."
+    elif inventory_complete and current_value != "new":
+        claim_value = "completeness"
+        evidence = [
+            str(classification.get("document_type"))
+            for _, classification in page_documents
+        ]
+        evidence_refs = [str(page.get("page_number")) for page, _ in page_documents]
+        reason = "Semua halaman terklasifikasi dan formulir klaim tidak ditemukan."
+    else:
+        return dict(contract)
+
+    method = "claim_document_inventory"
+    claim_case = {
+        **current_claim_case,
+        "value": claim_value,
+        "status": "derived",
+        "confidence": None,
+        "confidence_type": "grounded_rule",
+        "method": method,
+        "reason": reason,
+        "evidence": evidence,
+        "evidence_refs": evidence_refs,
+        "note": reason,
+    }
+    analysis["claim_case_type"] = claim_case
+
+    decisions = dict(analysis.get("decisions") or {})
+    for name, value in (
+        ("claimType", claim_value),
+        ("isNewClaim", claim_value == "new"),
+        ("isKelengkapan", claim_value == "completeness"),
+    ):
+        decisions[name] = {
+            "value": value,
+            "reason": reason,
+            "evidence": evidence,
+            "method": method,
+            "confidence": None,
+        }
+    analysis["decisions"] = decisions
+
+    updated = dict(contract)
+    updated["analyst_analysis"] = analysis
+    return updated
 
 
 def _length_of_stay(admission: Any, discharge: Any) -> int | None:
@@ -447,6 +584,7 @@ def build_claim_form(
     ``services.page_classifier``) and supplies both the document inventory and
     the document-level evidence used to separate inpatient from outpatient.
     """
+    contract = apply_document_claim_type(contract, pages, classifications)
     claim_data = contract.get("claim_data") or {}
     normalized = contract.get("normalized_claim_data") or {}
     analyst_analysis = contract.get("analyst_analysis") or {}
@@ -493,10 +631,313 @@ def build_claim_form(
     }
 
 
+def _is_empty_value(value: Any) -> bool:
+    return value is None or value == "" or value == [] or value == {}
+
+
+def _prune_parent(
+    mapping: Mapping[str, Any], *, ignore: Mapping[str, Any] | None = None
+) -> dict[str, Any] | None:
+    """Hapus parent bila semua value kosong atau hanya default semu.
+
+    ``ignore``: pasangan key->default yang dianggap sama dengan kosong
+    untuk pruning (mis. noOfDays=0, currency IDR default). Bila parent
+    dipertahankan, value asli tetap disimpan.
+    """
+    ignore = ignore or {}
+    cleaned: dict[str, Any] = {}
+    meaningful = False
+    for key, value in mapping.items():
+        if _is_empty_value(value):
+            continue
+        if key in ignore and value == ignore[key]:
+            cleaned[key] = value
+            continue
+        cleaned[key] = value
+        meaningful = True
+    if not meaningful:
+        return None
+    return cleaned
+
+
+def _pick(
+    claim_data: Mapping[str, Any], normalized: Mapping[str, Any], *keys: str
+) -> Any:
+    for key in keys:
+        value = _value(claim_data, normalized, key)
+        if value not in (None, "", [], {}):
+            return value
+    return None
+
+
+def _icd_at(claim_data: Mapping[str, Any], index: int) -> Any:
+    codes = list(claim_data.get("icd_codes") or [])
+    if index < len(codes):
+        return codes[index]
+    return None
+
+
+def _decisions_from_analysis(
+    analyst_analysis: Mapping[str, Any],
+) -> dict[str, Any]:
+    decisions = dict(analyst_analysis.get("decisions") or {})
+    if decisions:
+        return decisions
+    visit = analyst_analysis.get("visit_type") or {}
+    claim_case = analyst_analysis.get("claim_case_type") or {}
+    out: dict[str, Any] = {}
+    if visit:
+        out["visitType"] = {
+            "value": visit.get("value", "unknown"),
+            "reason": "; ".join(visit.get("evidence") or []),
+            "evidence": list(visit.get("evidence") or []),
+            "method": visit.get("method") or "",
+            "confidence": visit.get("confidence"),
+        }
+    if claim_case:
+        out["claimType"] = {
+            "value": claim_case.get("value", "unknown"),
+            "reason": "; ".join(claim_case.get("evidence") or []),
+            "evidence": list(claim_case.get("evidence") or []),
+            "method": claim_case.get("method") or "",
+            "confidence": claim_case.get("confidence"),
+        }
+    return out
+
+
+def build_grouped_claim_form(
+    contract: Mapping[str, Any],
+    *,
+    pages: Sequence[Mapping[str, Any]] | None = None,
+    classifications: Sequence[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Grouped slim JSON (claim-full-v2) pakai nama editForm + usage.
+
+    Hanya field penting per perawatan. Parent yang kosong total dihapus
+    (sesuai: yang ngga masuk gausah ada parentnya). Usage LLM ikut bila
+    tersedia di kontrak (key ``usage``).
+    """
+    contract = apply_document_claim_type(contract, pages, classifications)
+    claim_data = contract.get("claim_data") or {}
+    normalized = contract.get("normalized_claim_data") or {}
+    analyst_analysis = contract.get("analyst_analysis") or {}
+    provenance = contract.get("provenance") or {}
+    validation = contract.get("validation") or {}
+
+    visit_block = _visit_block(
+        claim_data, normalized, analyst_analysis, pages, classifications
+    )
+    reason = _reason_of_visit(claim_data, visit_block)
+    financial = _financial_block(claim_data, normalized)
+    visit_value = visit_block.get("type_of_visit") or "unknown"
+    claim_value = (analyst_analysis.get("claim_case_type") or {}).get(
+        "value", "unknown"
+    )
+    signals = analyst_analysis.get("claim_signals") or {}
+    decisions = _decisions_from_analysis(analyst_analysis)
+
+    def decision_flag(name: str, fallback: bool) -> bool:
+        decision = decisions.get(name)
+        if isinstance(decision, Mapping) and isinstance(decision.get("value"), bool):
+            return decision["value"]
+        return bool(signals.get(name, fallback))
+
+    is_ri = decision_flag("isRI", visit_value == "inpatient")
+    is_rj = decision_flag("isRJ", visit_value == "outpatient")
+    visit_conf = (analyst_analysis.get("visit_type") or {}).get("confidence")
+
+    grouped: dict[str, Any] = {"schema_version": CLAIM_GROUPED_VERSION}
+    grouped["isNewClaim"] = decision_flag("isNewClaim", claim_value == "new")
+    grouped["isKelengkapan"] = bool(
+        decision_flag("isKelengkapan", claim_value == "completeness")
+    )
+    grouped["isRI"] = is_ri
+    grouped["isRJ"] = is_rj
+    grouped["isOverseas"] = decision_flag("isOverseas", False)
+    grouped["possibleNewClaim"] = decision_flag("possibleNewClaim", False)
+    if signals.get("riConfidence") is not None:
+        grouped["riConfidence"] = signals.get("riConfidence")
+    elif is_ri:
+        grouped["riConfidence"] = visit_conf
+    if signals.get("rjConfidence") is not None:
+        grouped["rjConfidence"] = signals.get("rjConfidence")
+    elif is_rj:
+        grouped["rjConfidence"] = visit_conf
+    if decisions:
+        grouped["decisions"] = decisions
+
+    member = _prune_parent({
+        # MEMBER INFO (screenshot 1): INSURED NAME, DOB, CLIENT NO, EMAIL,
+        # TELEPHONE, MOBILE PHONE, ADDRESS, CLAIM TYPE, PAYEE TYPE
+        "insuredName": _pick(claim_data, normalized, "patient_name", "policy_holder_name"),
+        "dob": _value(claim_data, normalized, "date_of_birth"),
+        "clientNo": _pick(claim_data, normalized, "client_no", "member_number", "patient_id"),
+        "email": _raw(claim_data, "email"),
+        "telephone": _raw(claim_data, "telephone"),
+        "mobilePhone": _raw(claim_data, "mobile_phone"),
+        "address": _raw(claim_data, "address"),
+        "sysvClaimType": _raw(claim_data, "claim_type"),
+        "sysvPayeeType": _raw(claim_data, "payee_type"),
+        "similarityScore": (analyst_analysis.get("name_check") or {}).get(
+            "insured_similarity_pct"
+        ),
+    })
+    if member is not None:
+        grouped["memberInfo"] = member
+
+    doctors = list(claim_data.get("doctor_names") or [])
+    if claim_data.get("doctor_name") and claim_data["doctor_name"] not in doctors:
+        doctors = [claim_data["doctor_name"], *doctors]
+    header_raw = {
+        # HEADER (screenshot 2): kolom kiri + tengah + kanan form editForm.
+        # Hanya field penting sesuai perawatan; refund/bypass/source/fast/
+        # moreVisit tetap di full contract bila dibutuhkan audit.
+        "accountNo": _raw(claim_data, "account_no"),
+        "accountName": _raw(claim_data, "account_name"),
+        "bankIdDesc": _raw(claim_data, "bank_name"),
+        "bankBranchName": _raw(claim_data, "branch_name"),
+        "receivedDtm": _value(claim_data, normalized, "received_date"),
+        "submitDtm": _value(claim_data, normalized, "submit_date"),
+        "accidentDtm": _value(claim_data, normalized, "accident_date"),
+        "typeOfVisit": visit_block.get("type_of_visit"),
+        "visitFrmDtm": visit_block.get("admission_date")
+        or visit_block.get("hospitalization_date"),
+        "visitToDtm": visit_block.get("discharge_date")
+        or visit_block.get("hospitalization_date"),
+        "noOfDays": visit_block.get("no_of_days") or 0,
+        "hphpName": _raw(claim_data, "provider_name"),
+        "hphpId": _raw(claim_data, "provider_code"),
+        "hpspNames": doctors,
+        "reasonOfVists": reason.get("reason_of_visit"),
+        "icdCode1": _icd_at(claim_data, 0),
+        "icdCode2": _icd_at(claim_data, 1),
+        "subClaimNo": _raw(claim_data, "sub_claim_no"),
+        "caseNo": _raw(claim_data, "case_no"),
+        "preCertNo": _raw(claim_data, "precert_no"),
+        "sysvCurrencyType": financial.get("currency"),
+        "exchangeRate": financial.get("exchange_rate"),
+        "exchangeRateDtm": financial.get("exchange_rate_date"),
+        "invoiceNo": _raw(claim_data, "invoice_number"),
+        "discountAmt": _value(claim_data, normalized, "discount_amount"),
+        "cobAmt": _value(claim_data, normalized, "other_insurance_amount"),
+        "incuredAmt": financial.get("amount_incurred"),
+        "incuredIdrAmt": financial.get("amount_incurred"),
+    }
+    # typeOfVisit=unknown + noOfDays=0 + currency default (IDR/1) dianggap
+    # semu: header hilang bila tidak ada fakta header lain.
+    header = _prune_parent(
+        header_raw,
+        ignore={
+            "typeOfVisit": "unknown",
+            "noOfDays": 0,
+            "sysvCurrencyType": DEFAULT_CURRENCY,
+            "exchangeRate": DEFAULT_EXCHANGE_RATE,
+        },
+    )
+    if header is not None:
+        grouped["header"] = header
+
+    policy = _prune_parent({
+        # POLICY (screenshot 3 atas): POLICY HOLDER, EFFECTIVE DATE/RIDER,
+        # REINSTATE, POLICY/RIDER AGE, AGENT. Hilang bila semua null.
+        "policyHolder": _raw(claim_data, "policy_holder_name"),
+        "effectiveDate": _value(claim_data, normalized, "policy_effective_date"),
+        "policyAge": _raw(claim_data, "policy_age"),
+        "agentNo": _raw(claim_data, "agent_no"),
+    })
+    if policy is not None:
+        grouped["policyInfo"] = policy
+
+    slim_lines = []
+    for line in _service_lines(
+        claim_data, normalized, claim_data.get("invoice_records")
+    ):
+        slim_lines.append({
+            "serviceDateFrom": line.get("service_date_from"),
+            "serviceDateTo": line.get("service_date_to"),
+            "spspId": line.get("service_procedure_code")
+            or line.get("service_procedure_desc"),
+            "incuredAmt": line.get("incurred_amount"),
+        })
+    if slim_lines:
+        grouped["serviceLines"] = slim_lines
+
+    field_evidence = provenance.get("field_evidence") or {}
+    slim_evidence = {
+        key: field_evidence.get(key)
+        for key in (
+            "patient_name", "provider_name", "total_amount",
+            "admission_date", "discharge_date",
+        )
+        if field_evidence.get(key)
+    }
+    if slim_evidence:
+        grouped["provenance"] = {"fieldEvidence": slim_evidence}
+    review = {
+        "missingFields": list(analyst_analysis.get("missing_fields") or []),
+        "needsAttention": list(validation.get("inconsistencies") or [])
+        + list(analyst_analysis.get("inconsistencies") or []),
+    }
+    if any(review.values()):
+        grouped["review"] = review
+
+    usage = contract.get("usage")
+    if isinstance(usage, Mapping) and usage:
+        grouped["usage"] = dict(usage)
+    return grouped
+
+
+def build_full_claim_json(
+    contract: Mapping[str, Any],
+    *,
+    pages: Sequence[Mapping[str, Any]] | None = None,
+    classifications: Sequence[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Full JSON slim: grouped + decisions + provenance ringkas + usage."""
+    return build_grouped_claim_form(
+        contract, pages=pages, classifications=classifications
+    )
+
+
+def refresh_grouped_decisions(
+    contract: Mapping[str, Any], grouped: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Refresh decision objects in persisted grouped JSON from contract facts."""
+    provenance = contract.get("provenance") or {}
+    analyst_analysis = contract.get("analyst_analysis") or {}
+    refreshed_analysis = derive_claim_analysis(
+        contract.get("claim_data") or {},
+        contract.get("normalized_claim_data") or {},
+        provenance.get("field_evidence") or {},
+        contract.get("validation") or {},
+        icd_suggestions=analyst_analysis.get("icd_suggestions"),
+    )
+    refreshed = dict(grouped)
+    decisions = refreshed_analysis["decisions"]
+    refreshed["decisions"] = decisions
+    for decision_name, root_name in (
+        ("isRI", "isRI"),
+        ("isRJ", "isRJ"),
+        ("isNewClaim", "isNewClaim"),
+        ("isKelengkapan", "isKelengkapan"),
+        ("isOverseas", "isOverseas"),
+        ("possibleNewClaim", "possibleNewClaim"),
+    ):
+        value = decisions[decision_name]["value"]
+        refreshed[root_name] = value if isinstance(value, bool) else False
+    return refreshed
+
+
 __all__ = [
     "CLAIM_FORM_VERSION",
+    "CLAIM_GROUPED_VERSION",
     "DEFAULT_CURRENCY",
     "DEFAULT_EXCHANGE_RATE",
+    "FORM_NAME_ALIASES",
+    "apply_document_claim_type",
     "build_claim_form",
+    "build_full_claim_json",
+    "build_grouped_claim_form",
+    "refresh_grouped_decisions",
 ]
 

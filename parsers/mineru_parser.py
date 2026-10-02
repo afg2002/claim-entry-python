@@ -13,7 +13,11 @@ from pathlib import Path
 from typing import Any, Callable
 
 from config import AppConfig
-from services.claim_form import build_claim_form
+from services.claim_form import (
+    apply_document_claim_type,
+    build_claim_form,
+    build_full_claim_json,
+)
 from services.page_classifier import classify_pages
 from services.usage_tracker import (
     combine_usage_reports,
@@ -172,20 +176,36 @@ def parse_mineru(
         claim_form = None
         page_classifications = classify_pages(raw_ocr_pages, config) if raw_ocr_pages else []
         if isinstance(extraction, dict) and extraction.get("claim_data"):
+            extraction = apply_document_claim_type(
+                extraction, raw_ocr_pages, page_classifications
+            )
+        grouped_form = None
+        if isinstance(extraction, dict) and extraction.get("claim_data"):
             claim_form = build_claim_form(
                 extraction,
                 pages=raw_ocr_pages,
                 classifications=page_classifications,
             )
+            grouped_form = build_full_claim_json(
+                {**extraction, "usage": usage},
+                pages=raw_ocr_pages,
+                classifications=page_classifications,
+            )
         full_json_path = output / f"{source.stem}.full.json"
-        if extraction:
+        full_payload = (
+            grouped_form
+            if isinstance(grouped_form, dict) and grouped_form
+            else extraction
+        )
+        if full_payload:
             full_json_path.write_text(
-                json.dumps(extraction, ensure_ascii=False, indent=2, default=str),
+                json.dumps(full_payload, ensure_ascii=False, indent=2, default=str),
                 encoding="utf-8",
             )
 
         json_data: dict[str, Any] = {
             "claim_form": claim_form,
+            "grouped_claim_form": grouped_form,
             "mineru_raw": raw_json_data,
             "information_extraction": extraction,
             "raw_ocr_pages": raw_ocr_pages,
@@ -208,7 +228,7 @@ def parse_mineru(
                                              "elapsed_seconds": elapsed, "stage": "completed"})
         return _success(
             source, output, markdown, json_data, markdown_path, json_path, elapsed,
-            stdout_text, usage, claim_form, full_json_path,
+            stdout_text, usage, claim_form, full_json_path, grouped_form,
         )
     except Exception as exc:
         if process is not None and process.poll() is None:
@@ -225,9 +245,10 @@ def parse_mineru(
 
 
 def _success(source, output, markdown, json_data, md_path, json_path, elapsed, stdout,
-             usage=None, claim_form=None, full_json_path=None):
+             usage=None, claim_form=None, full_json_path=None, grouped_form=None):
     return {"parser": "MinerU", "status": "success", "input_file": source.name, "markdown": markdown,
             "json_data": json_data, "usage": usage or {}, "claim_form": claim_form,
+            "grouped_claim_form": grouped_form,
             "artifacts": {"markdown_path": str(md_path) if md_path else None,
             "json_path": str(json_path) if json_path else None,
             "full_json_path": str(full_json_path) if full_json_path else None,

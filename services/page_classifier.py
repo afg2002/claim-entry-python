@@ -85,7 +85,8 @@ class PageClassification(BaseModel):
         min_length=1,
         description=(
             "Nama dokumen sesuai judulnya sendiri, ditulis dalam bahasa "
-            "dokumen. Contoh: 'Surat Tugas Dokter', 'Formulir Pengajuan Klaim', "
+            "dokumen. Pertahankan nama SKD/Surat Keterangan Dokter dan "
+            "Formulir Pengajuan Klaim dengan jelas. Contoh: 'Surat Tugas Dokter', 'Formulir Pengajuan Klaim', "
             "'Rincian Tagihan', 'Hasil Laboratorium Darah', 'Kwitansi Rawat Jalan'. "
             "Jangan pernah menjawab 'other', 'unknown', atau 'dokumen'; "
             "sebutkan nama sesungguhnya."
@@ -94,8 +95,9 @@ class PageClassification(BaseModel):
     category: DocumentCategory | None = Field(
         default=None,
         description=(
-            "Hanya untuk logika alur klaim (rawat inap atau rawat jalan). "
-            "Isi hanya bila dokumen benar-benar cocok, selain itu null. "
+            "Kategori dokumen untuk logika klaim: formulir_klaim, rawat inap, "
+            "atau rawat jalan. Gunakan formulir_klaim hanya untuk formulir "
+            "pengajuan klaim; isi hanya bila benar-benar cocok, selain itu null. "
             "Jangan memaksa kecocokan yang tidak tepat."
         ),
     )

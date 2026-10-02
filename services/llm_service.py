@@ -303,7 +303,7 @@ def _build_claim_analysis_prompt(markdown: str, page_texts: list[tuple[int, str]
         "Gunakan TOON (Token-Oriented Object Notation) untuk representasi data di prompt agar lebih ringkas: \n"
         f"{toon_schema}\n\n"
         "HARUS DILAKUKAN:\n"
-        "1. Deteksi claim_case_type: NEW, KELENGKAPAN, atau TINJAU_ULANG.\n"
+        "1. Deteksi claim_case_type: NEW atau KELENGKAPAN.\n"
         "2. Deteksi visit_type: OUTPATIENT atau INPATIENT.\n"
         "3. Ekstrak semua dokumen yang ditemukan dan dokumen yang hilang.\n"
         "4. Ekstrak member, provider, doctor, admission/discharge, diagnosis, ICD, medical history, pre-existing indicators.\n"

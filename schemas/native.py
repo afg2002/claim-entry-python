@@ -87,7 +87,7 @@ class ClaimAnalysis(BaseModel):
     doctor_names: list[str] = Field(default_factory=list, examples=[["Dr. Jane Doe", "Dr. John Smith"]])
 
     hospitalization_date: Optional[str] = Field(default=None, examples=["2026-01-15"])
-    admission_date: Optional[str] = Field(default=None, examples=["2026-01-15"])
+    admission_date: Optional[str] = Field(default=None, examples=["2026-01-15"], description="Admission Date ")
     discharge_date: Optional[str] = Field(default=None, examples=["2026-01-18"])
     length_of_stay_days: Optional[int] = Field(default=None, examples=[3])
     accident_date: Optional[str] = Field(default=None, examples=["2026-01-10"])

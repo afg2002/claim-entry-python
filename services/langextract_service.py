@@ -46,7 +46,7 @@ from services.claim_fields import (
     scalar_fields,
     undescribed_fields,
 )
-from services.claim_rules import canonical_claim_case_type, canonical_visit_type
+from services.assessment_service import derive_claim_analysis
 from services.usage_tracker import UsageLedger, build_usage_report
 
 try:  # Keep the rest of the app importable when the optional extra is absent.
@@ -759,246 +759,6 @@ def _field_evidence_for_analysis(
     return {field: [dict(evidence) for evidence in values] for field, values in field_evidence.items()}
 
 
-def _snippet(evidence: Mapping[str, Any]) -> str | None:
-    value = evidence.get("source_text")
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text if text else None
-
-
-def _analysis_evidence(
-    field_evidence: Mapping[str, Sequence[Mapping[str, Any]]],
-    field_name: str,
-) -> list[dict[str, Any]]:
-    return [dict(item) for item in field_evidence.get(field_name, [])]
-
-
-def _analysis_evidence_snippets(evidence: Sequence[Mapping[str, Any]]) -> list[str]:
-    return [
-        snippet
-        for snippet in (_snippet(item) for item in evidence)
-        if snippet
-    ]
-
-
-def _classify_visit_type(
-    claim_data: Mapping[str, Any],
-    field_evidence: Mapping[str, Sequence[Mapping[str, Any]]],
-) -> dict[str, Any]:
-    """Classify visit only from an explicit label or a strong date pair."""
-    visit_evidence = _analysis_evidence(field_evidence, "visit_type")
-    admission_evidence = _analysis_evidence(field_evidence, "admission_date")
-    discharge_evidence = _analysis_evidence(field_evidence, "discharge_date")
-    explicit_visit = claim_data.get("visit_type")
-
-    if explicit_visit not in (None, ""):
-        value = canonical_visit_type(explicit_visit) or "unknown"
-        return {
-            "value": value,
-            "status": "extracted" if value != "unknown" else "unknown",
-            "confidence": 1.0 if value != "unknown" else None,
-            "confidence_type": "grounded_rule" if value != "unknown" else None,
-            "method": "explicit_document_value" if value != "unknown" else "unrecognized_explicit_value",
-            "evidence": _analysis_evidence_snippets(visit_evidence),
-            "evidence_refs": [item.get("extraction_id") for item in visit_evidence],
-        }
-
-    if claim_data.get("admission_date") and claim_data.get("discharge_date"):
-        evidence = admission_evidence + discharge_evidence
-        return {
-            "value": "inpatient",
-            "status": "derived",
-            "confidence": 0.9,
-            "confidence_type": "heuristic_not_calibrated",
-            "method": "admission_and_discharge_dates_present",
-            "evidence": _analysis_evidence_snippets(evidence),
-            "evidence_refs": [item.get("extraction_id") for item in evidence],
-        }
-
-    # An invoice, resume, or document type alone does not establish inpatient
-    # versus outpatient. Keep the result unknown and show incomplete evidence.
-    incomplete_date_evidence = admission_evidence + discharge_evidence
-    return {
-        "value": "unknown",
-        "status": "unknown",
-        "confidence": None,
-        "confidence_type": None,
-        "method": "insufficient_explicit_evidence",
-        "evidence": _analysis_evidence_snippets(incomplete_date_evidence),
-        "evidence_refs": [item.get("extraction_id") for item in incomplete_date_evidence],
-        "note": "Invoice/resume/document type alone is not sufficient to determine visit type.",
-    }
-
-
-def _classify_claim_case_type(
-    claim_data: Mapping[str, Any],
-    field_evidence: Mapping[str, Sequence[Mapping[str, Any]]],
-) -> dict[str, Any]:
-    """Normalize explicit claim-stage labels without inventing a stage."""
-    evidence = _analysis_evidence(field_evidence, "claim_type")
-    raw_value = claim_data.get("claim_type")
-    if raw_value in (None, ""):
-        return {
-            "value": "unknown",
-            "status": "unknown",
-            "confidence": None,
-            "confidence_type": None,
-            "method": "no_explicit_claim_type",
-            "raw_value": None,
-            "evidence": [],
-            "evidence_refs": [],
-            "note": "Document type or filename alone is not used to infer claim stage.",
-        }
-
-    raw_values = [
-        str(item.get("source_text") or "").strip()
-        for item in evidence
-        if str(item.get("source_text") or "").strip()
-    ]
-    unique_raw_values = list(dict.fromkeys(raw_values))
-    if len(unique_raw_values) > 1:
-        return {
-            "value": "unknown",
-            "status": "unknown",
-            "confidence": None,
-            "confidence_type": None,
-            "method": "conflicting_explicit_claim_type_values",
-            "raw_value": str(raw_value),
-            "raw_values": unique_raw_values,
-            "evidence": _analysis_evidence_snippets(evidence),
-            "evidence_refs": [item.get("extraction_id") for item in evidence],
-            "note": "Multiple claim-stage labels require analyst review.",
-        }
-
-    normalized_value = canonical_claim_case_type(str(raw_value))
-    matched_value = normalized_value[0] if normalized_value else None
-    matched_terms = list(normalized_value[1]) if normalized_value else []
-
-    if matched_value is None:
-        return {
-            "value": "unknown",
-            "status": "unknown",
-            "confidence": None,
-            "confidence_type": None,
-            "method": "unrecognized_explicit_claim_type",
-            "raw_value": str(raw_value),
-            "evidence": _analysis_evidence_snippets(evidence),
-            "evidence_refs": [item.get("extraction_id") for item in evidence],
-            "note": "The explicit claim-stage label is not in the configured business mapping.",
-        }
-
-    return {
-        "value": matched_value,
-        "status": "derived",
-        "confidence": 1.0,
-        "confidence_type": "grounded_rule",
-        "method": "explicit_claim_type_mapping",
-        "raw_value": str(raw_value),
-        "matched_terms": matched_terms,
-        "evidence": _analysis_evidence_snippets(evidence),
-        "evidence_refs": [item.get("extraction_id") for item in evidence],
-    }
-
-
-def derive_claim_analysis(
-    claim_data: Mapping[str, Any],
-    normalized_claim_data: Mapping[str, Any],
-    field_evidence: Mapping[str, Sequence[Mapping[str, Any]]],
-    validation: Mapping[str, Any],
-    *,
-    icd_suggestions: Sequence[Mapping[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """Build analyst-only values with explicit status and deterministic evidence."""
-    visit_analysis = _classify_visit_type(claim_data, field_evidence)
-    claim_case_analysis = _classify_claim_case_type(claim_data, field_evidence)
-
-    required_checks = (
-        ("provider_name", "Provider name"),
-        ("invoice_number", "Invoice number"),
-        ("admission_date", "Admission date"),
-        ("discharge_date", "Discharge date"),
-        ("diagnosis", "Diagnosis"),
-    )
-    missing_fields: list[str] = []
-    for field_name, label in required_checks:
-        value = claim_data.get(field_name)
-        if value is None or value == [] or value == "":
-            missing_fields.append(field_name)
-    missing_information = [label for field_name, label in required_checks if field_name in missing_fields]
-
-    inconsistencies = list(validation.get("inconsistencies", []))
-    for conflict in validation.get("conflicts", []):
-        inconsistencies.append(
-            f"Multiple explicit values found for {conflict['field']}: {', '.join(conflict['values'])}."
-        )
-
-    potential_risks: list[str] = []
-    if claim_data.get("diagnosis") and not claim_data.get("icd_codes"):
-        potential_risks.append("No explicit ICD code was found for the extracted diagnosis.")
-    if validation.get("ungrounded_item_count", 0):
-        potential_risks.append("Some model output was not grounded to the Markdown source.")
-    if validation.get("conflicts"):
-        potential_risks.append("Conflicting explicit values require analyst review.")
-    if "Provider name" in missing_information:
-        potential_risks.append("Provider name is missing from the available evidence.")
-    if "Invoice number" in missing_information:
-        potential_risks.append("Invoice number is missing from the available evidence.")
-
-    fraud_indicators: list[str] = []
-    for inconsistency in inconsistencies:
-        if "date" in inconsistency.lower() or "total" in inconsistency.lower() or "multiple explicit" in inconsistency.lower():
-            fraud_indicators.append(inconsistency)
-    investigation_recommended = bool(inconsistencies)
-
-    diagnosis_values = list(claim_data.get("diagnosis", []))
-    medication_values = list(claim_data.get("medications", []))
-    procedure_values = list(claim_data.get("procedures", []))
-    financial_parts: list[str] = []
-    if claim_data.get("total_amount") is not None:
-        financial_parts.append(f"total amount {claim_data['total_amount']}")
-    if claim_data.get("currency") is not None:
-        financial_parts.append(f"currency {claim_data['currency']}")
-    if claim_data.get("invoice_number") is not None:
-        financial_parts.append(f"invoice {claim_data['invoice_number']}")
-
-    case_snapshot = (
-        f"Extracted {len(diagnosis_values)} diagnosis record(s), "
-        f"{len(medication_values)} medication record(s), and "
-        f"{len(procedure_values)} procedure record(s). Visit type: "
-        f"{visit_analysis['value']} ({visit_analysis['status']})."
-    )
-    medical_summary = (
-        "Explicit diagnoses: " + ", ".join(diagnosis_values) + ". "
-        "Explicit procedures: " + (", ".join(procedure_values) if procedure_values else "none") + "."
-    )
-    financial_summary = (
-        "Explicit financial evidence: " + (", ".join(financial_parts) if financial_parts else "none") + "."
-    )
-    claim_story = (
-        f"The available Markdown contains {len(diagnosis_values)} diagnosis item(s) and "
-        f"{len(medication_values)} grouped medication item(s). "
-        f"Derived visit classification is {visit_analysis['value']} with status {visit_analysis['status']}."
-    )
-
-    return {
-        "visit_type": visit_analysis,
-        "claim_case_type": claim_case_analysis,
-        "missing_information": missing_information,
-        "missing_fields": missing_fields,
-        "inconsistencies": inconsistencies,
-        "potential_risks": potential_risks,
-        "fraud_indicators": fraud_indicators,
-        "investigation_recommended": investigation_recommended,
-        "icd_suggestions": [dict(item) for item in (icd_suggestions or [])],
-        "case_snapshot": case_snapshot,
-        "medical_summary": medical_summary,
-        "financial_summary": financial_summary,
-        "claim_story": claim_story,
-        "summary_status": "derived",
-    }
-
-
 def _field_evidence_map(
     items: Sequence[Mapping[str, Any]],
 ) -> dict[str, list[dict[str, Any]]]:
@@ -1300,23 +1060,6 @@ def build_examples() -> list[Any]:
                 ),
             ],
         ),
-        lx.data.ExampleData(
-            text="Claim Type: Tinjau ulang\nSupporting Document: SP4",
-            extractions=[
-                _example_extraction(
-                    "claim_type",
-                    "Tinjau ulang",
-                    group_id="claim_1",
-                    group_type="claim",
-                ),
-                _example_extraction(
-                    "supporting_document",
-                    "SP4",
-                    group_id="document_1",
-                    group_type="document",
-                ),
-            ],
-        ),
     ]
 
 
@@ -1398,8 +1141,11 @@ def build_extraction_schema() -> dict[str, Any]:
     return lx.schema.extractions_schema(item_schema)
 
 
-def build_prompt() -> str:
+def build_prompt(rulebook: Any | None = None) -> str:
+    from schemas.claim_rulebook import rulebook_prompt_section
+
     field_guide = _field_guide()
+    rules_section = rulebook_prompt_section(rulebook)
     return textwrap.dedent(
         f"""
         You are the factual extraction stage for an insurance claim analyst.
@@ -1419,10 +1165,9 @@ def build_prompt() -> str:
            an ICD code is visibly written in the document.
         6. Do not infer visit type. Emit visit_type only when the document
            explicitly states inpatient, outpatient, rawat inap, or rawat jalan.
-        7. Emit claim_type only when a claim stage/type is explicitly written
-           (for example SKD, Formulir, Kelengkapan, or Tinjau ulang). SP4 is
-           a supporting document unless the document explicitly labels it as
-           the claim stage; never infer a stage from the filename alone.
+          7. Emit claim_type only when a claim stage/type is explicitly written
+              (for example SKD, Formulir, or Kelengkapan). SP4 is a supporting
+              document, not a claim stage; never infer a stage from the filename.
         8. Use the same group_id for related items: diagnosis and its explicit
            ICD code; medication and dosage/frequency/duration; invoice number,
            invoice date, and amounts; a lab result and its attributes.
@@ -1436,6 +1181,7 @@ def build_prompt() -> str:
             a placeholder extraction.
         13. Extract supporting_document only when a document/supporting
             document is explicitly named in the source.
+        14. {rules_section}
         """
     ).strip()
 

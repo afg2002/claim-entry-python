@@ -157,7 +157,7 @@ class LangExtractServiceTests(unittest.TestCase):
         self.assertEqual(result["analyst_analysis"]["visit_type"]["value"], "inpatient")
         self.assertEqual(result["analyst_analysis"]["visit_type"]["status"], "derived")
 
-    def test_review_type_maps_explicit_stage_but_sp4_alone_is_document(self):
+    def test_review_is_not_a_claim_stage_and_sp4_remains_a_document(self):
         markdown = "Claim Type: Tinjau ulang\nSupporting Document: SP4"
         items = []
         for field, value, label in (
@@ -187,7 +187,7 @@ class LangExtractServiceTests(unittest.TestCase):
         result = build_claim_contract(
             {"items": items, "source_characters": len(markdown)}
         )
-        self.assertEqual(result["analyst_analysis"]["claim_case_type"]["value"], "review")
+        self.assertEqual(result["analyst_analysis"]["claim_case_type"]["value"], "unknown")
         self.assertEqual(result["claim_data"]["supporting_documents"], ["SP4"])
 
     def test_currency_from_amount_is_derived_not_explicit(self):

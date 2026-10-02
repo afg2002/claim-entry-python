@@ -15,9 +15,13 @@ from services.claim_form import (
     DEFAULT_CURRENCY,
     DEFAULT_EXCHANGE_RATE,
     build_claim_form,
+    build_full_claim_json,
+    build_grouped_claim_form,
+    refresh_grouped_decisions,
 )
 from services.claim_rules import (
     canonical_claim_case_type,
+    canonical_visit_type,
     document_title,
     visit_type_from_documents,
 )
@@ -517,6 +521,38 @@ class IcdRecommendationTests(unittest.TestCase):
 
 
 class ClaimCaseTypeTests(unittest.TestCase):
+    def test_review_labels_are_not_claim_type_categories(self):
+        self.assertIsNone(canonical_claim_case_type("SP4"))
+        self.assertIsNone(canonical_claim_case_type("Tinjau ulang"))
+
+    def test_custom_rules_drive_claim_visit_and_document_classification(self):
+        from schemas.claim_rulebook import (
+            ClaimRulebook,
+            ClaimTypeRule,
+            DocumentRules,
+            VisitRules,
+        )
+
+        rulebook = ClaimRulebook(
+            claim_types=[ClaimTypeRule(value="completeness", labels=["manual audit"])],
+            visit=VisitRules(inpatient_labels=["hospital stay"]),
+            documents=DocumentRules(
+                inpatient_document_types=["stay_note"],
+                inpatient_text_markers=["admitted overnight"],
+            ),
+        )
+        self.assertEqual(
+            canonical_claim_case_type("Manual Audit", rulebook),
+            ("completeness", ("manual audit",)),
+        )
+        self.assertEqual(
+            canonical_visit_type("Hospital Stay", rulebook), "inpatient"
+        )
+        self.assertEqual(
+            visit_type_from_documents(["stay_note"], rulebook=rulebook)[0],
+            "inpatient",
+        )
+
     def test_completeness_claim_is_recognized(self):
         items = [_item("claim_type", "Kelengkapan", group="c1", start=0)]
         form = build_claim_form(_contract(items))
@@ -531,6 +567,50 @@ class ClaimCaseTypeTests(unittest.TestCase):
         self.assertEqual(
             canonical_claim_case_type("Kelengkapan Dokumen")[0], "completeness"
         )
+
+    def test_document_inventory_derives_new_for_skd_or_claim_form(self):
+        for document_type in ("SKD", "Formulir Pengajuan Klaim"):
+            with self.subTest(document_type=document_type):
+                pages = [{"page_number": 1, "raw_text": document_type}]
+                classifications = [{
+                    "page": "1",
+                    "document_type": document_type,
+                    "category": None,
+                    "source": "model",
+                }]
+                form = build_claim_form(
+                    _contract([]), pages=pages, classifications=classifications
+                )
+                self.assertEqual(form["claim"]["claim_case_type"], "new")
+
+    def test_complete_named_inventory_without_claim_form_is_completeness(self):
+        pages = [
+            {"page_number": 1, "raw_text": "Invoice"},
+            {"page_number": 2, "raw_text": "Resume Medis"},
+        ]
+        classifications = [
+            {"page": "1", "document_type": "Invoice", "source": "model"},
+            {"page": "2", "document_type": "Resume Medis", "source": "model"},
+        ]
+        grouped = build_grouped_claim_form(
+            _contract([]), pages=pages, classifications=classifications
+        )
+        self.assertEqual(grouped["decisions"]["claimType"]["value"], "completeness")
+        self.assertTrue(grouped["isKelengkapan"])
+
+    def test_unclassified_page_does_not_imply_completeness(self):
+        pages = [
+            {"page_number": 1, "raw_text": "Invoice"},
+            {"page_number": 2, "raw_text": ""},
+        ]
+        classifications = [
+            {"page": "1", "document_type": "Invoice", "source": "model"},
+            {"page": "2", "document_type": None, "source": "not_named"},
+        ]
+        grouped = build_grouped_claim_form(
+            _contract([]), pages=pages, classifications=classifications
+        )
+        self.assertEqual(grouped["decisions"]["claimType"]["value"], "unknown")
 
 
 
@@ -601,6 +681,182 @@ class DescriptionWiringTests(unittest.TestCase):
         finally:
             module.FIELD_SPECS = saved
         self.assertTrue(any("must not set description" in error for error in errors))
+
+
+class GroupedSlimTests(unittest.TestCase):
+    def test_document_titles_do_not_conflict_with_claim_type_category(self):
+        claim_type_items = [
+            _item(
+                "claim_type",
+                "FORMULIR KLAIM MANFAAT HIDUP – ASURANSI INDIVIDU",
+                group="ct1",
+            ),
+            _item("claim_type", "formulir klaim", group="ct2"),
+            _item(
+                "claim_type",
+                "FORMULIR KLAIM MANFAAT HIDUP – ASURANSI INDIVIDU",
+                group="ct3",
+            ),
+            _item("claim_type", "Formulir Klaim", group="ct4"),
+            _item("claim_type", "SURAT KETERANGAN DOKTER", group="ct5"),
+            _item("claim_type", "SURAT KETERANGAN DOKTER", group="ct6"),
+        ]
+        contract = _contract(claim_type_items)
+
+        self.assertEqual(
+            contract["analyst_analysis"]["claim_case_type"]["value"], "new"
+        )
+        self.assertEqual(
+            contract["analyst_analysis"]["claim_case_type"]["method"],
+            "explicit_claim_type_mapping",
+        )
+        self.assertEqual(
+            contract["analyst_analysis"]["claim_case_type"]["evidence"],
+            [
+                "FORMULIR KLAIM MANFAAT HIDUP – ASURANSI INDIVIDU",
+                "formulir klaim",
+                "FORMULIR KLAIM MANFAAT HIDUP – ASURANSI INDIVIDU",
+                "Formulir Klaim",
+            ],
+        )
+
+    def test_legacy_grouped_conflict_is_refreshed_from_saved_facts(self):
+        items = [
+            _item("claim_type", "FORMULIR KLAIM MANFAAT HIDUP – ASURANSI INDIVIDU", group="ct1"),
+            _item("claim_type", "SURAT KETERANGAN DOKTER", group="ct2"),
+        ]
+        contract = _contract(items)
+        contract["analyst_analysis"].pop("decisions", None)
+        contract["analyst_analysis"]["claim_case_type"] = {
+            "value": "unknown",
+            "method": "conflicting_explicit_claim_type_values",
+            "evidence": ["formulir klaim", "SURAT KETERANGAN DOKTER"],
+        }
+        old_grouped = build_grouped_claim_form(contract)
+        self.assertEqual(old_grouped["decisions"]["claimType"]["value"], "unknown")
+
+        refreshed = refresh_grouped_decisions(contract, old_grouped)
+        self.assertEqual(refreshed["decisions"]["claimType"]["value"], "new")
+        self.assertEqual(refreshed["isNewClaim"], True)
+
+    def test_major_flags_have_explainable_decisions(self):
+        contract = _contract([
+            _item("provider_name", "Mount Elizabeth Hospital", group="p1", family="provider"),
+            _item("visit_type", "Rawat Jalan", group="v1"),
+            _item("claim_type", "REIMBURSEMENT", group="c1"),
+            _item("currency", "SGD", group="f1", family="invoice"),
+            _item("discharge_date", "2026-08-01", group="d1"),
+            _item("invoice_date", "2026-09-05", group="i1", family="invoice"),
+        ])
+        grouped = build_grouped_claim_form(contract)
+        decisions = grouped["decisions"]
+
+        for name in (
+            "visitType", "isRI", "isRJ", "claimType", "isNewClaim",
+            "isKelengkapan", "isOverseas", "possibleNewClaim",
+        ):
+            self.assertEqual(
+                set(decisions[name]),
+                {"value", "confidence", "method", "reason", "evidence"},
+            )
+            self.assertTrue(decisions[name]["reason"])
+
+        self.assertTrue(grouped["isRJ"])
+        self.assertTrue(grouped["isNewClaim"])
+        self.assertTrue(grouped["isOverseas"])
+        self.assertTrue(grouped["possibleNewClaim"])
+        self.assertEqual(decisions["isRJ"]["value"], True)
+        self.assertEqual(decisions["possibleNewClaim"]["value"], True)
+
+    def test_insufficient_evidence_is_unknown_not_a_confident_negative(self):
+        grouped = build_grouped_claim_form(_contract([]))
+        decisions = grouped["decisions"]
+
+        for name in ("isRI", "isRJ", "isOverseas", "possibleNewClaim"):
+            self.assertIsNone(decisions[name]["value"])
+            self.assertIsNone(decisions[name]["confidence"])
+            self.assertTrue(decisions[name]["reason"])
+
+    def test_grouped_matches_screenshot_parents(self):
+        contract = _contract(IDENTITY_ITEMS + CLAIM_ITEMS)
+        grouped = build_grouped_claim_form(contract)
+        # MEMBER INFO (screenshot 1)
+        self.assertEqual(grouped["memberInfo"]["insuredName"], "ANDRIAN YUSUP")
+        self.assertEqual(grouped["memberInfo"]["dob"], "1955-12-19")
+        self.assertEqual(grouped["memberInfo"]["clientNo"], "51197086")
+        self.assertEqual(grouped["memberInfo"]["mobilePhone"], "6283830303987")
+        # HEADER (screenshot 2): visit + provider + icd + currency + amount
+        header = grouped["header"]
+        self.assertEqual(header["hphpName"], "MITRA KELUARGA PONDOK TJANDRA")
+        self.assertEqual(header["hpspNames"], ["Dr. Andrianto, Sp.OT"])
+        self.assertEqual(header["visitFrmDtm"], "2026-08-31")
+        self.assertEqual(header["visitToDtm"], "2026-08-31")
+        self.assertEqual(header["incuredAmt"], 1215882)
+        self.assertEqual(header["sysvCurrencyType"], "IDR")
+        # POLICY (screenshot 3): hanya yang ada, hilang bila semua null
+        self.assertEqual(grouped["policyInfo"]["policyHolder"], "ANDRIAN YUSUP")
+
+    def test_empty_parents_are_dropped(self):
+        grouped = build_grouped_claim_form(_contract([]))
+        for parent in ("memberInfo", "header", "policyInfo", "serviceLines"):
+            self.assertNotIn(parent, grouped)
+
+    def test_multiple_doctors_all_kept(self):
+        items = IDENTITY_ITEMS + CLAIM_ITEMS + [
+            _item("doctor_name", "Dr. Kedua", group="p4", family="provider", start=190),
+        ]
+        grouped = build_grouped_claim_form(_contract(items))
+        self.assertEqual(
+            grouped["header"]["hpspNames"],
+            ["Dr. Andrianto, Sp.OT", "Dr. Kedua"],
+        )
+
+    def test_full_json_carries_decisions_and_usage(self):
+        contract = _contract(IDENTITY_ITEMS + CLAIM_ITEMS)
+        contract["usage"] = {"total": {"total_tokens": 10}}
+        full = build_full_claim_json(contract)
+        self.assertIn("decisions", full)
+        self.assertEqual(full["usage"]["total"]["total_tokens"], 10)
+
+
+class RulebookSingleDoorTests(unittest.TestCase):
+    def test_decision_schema_accepts_flags_and_unknown_values(self):
+        from schemas.claim_rulebook import Decision
+
+        flag = Decision(value=True, reason="Currency non-IDR.")
+        unknown = Decision(value=None, reason="Tanggal belum cukup.")
+        self.assertIs(flag.value, True)
+        self.assertIsNone(unknown.value)
+
+    def test_prompt_generated_from_rulebook(self):
+        from schemas.claim_rulebook import ClaimRulebook, rulebook_prompt_section
+        from services.langextract_service import build_prompt
+
+        custom = ClaimRulebook()
+        custom.overseas.country_currency["Vietnam"] = "VND"
+        prompt = build_prompt(custom)
+        self.assertIn("Vietnam", prompt)
+        self.assertIn("Business rules (generated from ClaimRulebook)", prompt)
+        self.assertIn(rulebook_prompt_section(custom).splitlines()[0], prompt)
+
+    def test_rulebook_rejects_bad_confidence(self):
+        from pydantic import ValidationError
+
+        from schemas.claim_rulebook import ConfidenceTier
+
+        with self.assertRaises(ValidationError):
+            ConfidenceTier(when="x", confidence=150.0)
+
+    def test_rules_follow_custom_rulebook(self):
+        from schemas.claim_rulebook import ClaimRulebook
+        from services.claim_rules import canonical_visit_type, detect_overseas
+
+        custom = ClaimRulebook()
+        custom.visit.inpatient_labels = ["opname"]
+        self.assertEqual(canonical_visit_type("opname", custom), "inpatient")
+        self.assertIsNone(canonical_visit_type("rawat inap", custom))
+        flag, country, _reason = detect_overseas("RS Jakarta", "USD", custom)
+        self.assertTrue(flag)
 
 
 if __name__ == "__main__":

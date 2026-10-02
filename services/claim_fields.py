@@ -91,7 +91,11 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         kind="scalar",
         field_type="identifier",
         family="identity",
-        description="Alamat rumah Tertanggung/pasien.",
+        description=(
+    "Alamat email yang secara eksplisit milik tertanggung/pasien. "
+    "Jangan ekstrak email rumah sakit, dokter, atau agen sebagai email pasien. "
+    "Jika pemilik email tidak jelas, jangan isi field ini."
+),
     ),
     FieldSpec(
         name="telephone",
@@ -187,8 +191,8 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         field_type="label",
         family="claim",
         description=(
-            "Jenis formulir klaim yang tertulis, misalnya SKD, reimbursement, "
-            "kelengkapan, atau tinjau ulang."
+            "Jenis klaim yang tertulis, misalnya SKD, formulir, reimbursement, "
+            "atau kelengkapan."
         ),
     ),
     FieldSpec(

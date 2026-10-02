@@ -10,7 +10,11 @@ import fitz
 from config import AppConfig
 from schemas import NATIVE_SCHEMA_REGISTRY
 from services import extract_claim_from_markdown, extract_with_remote_vlm
-from services.claim_form import build_claim_form
+from services.claim_form import (
+    apply_document_claim_type,
+    build_claim_form,
+    build_full_claim_json,
+)
 from services.page_classifier import classify_pages
 from services.usage_tracker import (
     combine_usage_reports,
@@ -391,6 +395,7 @@ def parse_docling(
                 debug_prompts["extraction"] = remote_result["debug_prompts"]
 
         usage_total = combine_usage_reports([usage_vlm, usage_llm], stage="document_total")
+        usage_tree = {"vlm_ocr": usage_vlm, "extraction": usage_llm, "total": usage_total}
         # The compact form is the primary artifact; the full auditable contract
         # is kept alongside it so nothing is lost for review or regression.
         claim_form = None
@@ -398,18 +403,31 @@ def parse_docling(
         if raw_ocr_pages:
             page_classifications = classify_pages(raw_ocr_pages, config)
         if isinstance(extraction, dict) and extraction.get("claim_data"):
+            extraction = apply_document_claim_type(
+                extraction, raw_ocr_pages, page_classifications
+            )
+        grouped_form = None
+        if isinstance(extraction, dict) and extraction.get("claim_data"):
             claim_form = build_claim_form(
                 extraction,
                 pages=raw_ocr_pages,
                 classifications=page_classifications,
             )
+            # Slim grouped JSON per screenshot (memberInfo/header/policyInfo)
+            # + decisions + provenance ringkas + usage LLM.
+            grouped_form = build_full_claim_json(
+                {**extraction, "usage": usage_tree},
+                pages=raw_ocr_pages,
+                classifications=page_classifications,
+            )
         data = {
             "claim_form": claim_form,
+            "grouped_claim_form": grouped_form,
             "information_extraction": extraction,
             "docling_document": raw_data,
             "raw_ocr_pages": raw_ocr_pages,
             "debug_prompts": debug_prompts,
-            "usage": {"vlm_ocr": usage_vlm, "extraction": usage_llm, "total": usage_total},
+            "usage": usage_tree,
         }
         markdown_path = out / f"{source.stem}.md"
         json_path = out / f"{source.stem}.json"
@@ -431,6 +449,7 @@ def parse_docling(
             "json_data": data,
             "usage": data["usage"],
             "claim_form": claim_form,
+            "grouped_claim_form": grouped_form,
             "artifacts": {
                 "markdown_path": str(markdown_path),
                 "json_path": str(json_path),
