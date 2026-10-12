@@ -12,12 +12,7 @@ def _config_int(values: dict[str, str], key: str, default: int, minimum: int = 1
         return default
 
 
-def _config_optional_int(
-    values: dict[str, str],
-    key: str,
-    default: int | None,
-    minimum: int = 0,
-) -> int | None:
+def _config_optional_int(values: dict[str, str], key: str, default: int | None, minimum: int = 0) -> int | None:
     raw_value = values.get(key)
     if raw_value is None or not raw_value.strip():
         return default
@@ -54,20 +49,17 @@ class AppConfig:
     usd_to_idr: float
     input_rate_per_million: float
     output_rate_per_million: float
-
-    # Per-stage rates let the VLM/OCR model and the extraction model be billed
-    # separately.  They default to the generic rates above so existing
-    # config.properties files keep producing the same cost figures.
     vlm_input_rate_per_million: float = 0.0
     vlm_output_rate_per_million: float = 0.0
     langextract_input_rate_per_million: float = 0.0
     langextract_output_rate_per_million: float = 0.0
-    # When a provider omits the usage block, fall back to tiktoken estimates
-    # instead of showing nothing.  Estimates are always labelled as such.
     usage_estimate_fallback: bool = True
-
-    # LangExtract runs after VLM OCR/Markdown and is intentionally
-    # configured separately from the OCR model.
+    pre_vlm_mapping_enabled: bool = True
+    pre_vlm_regex_enabled: bool = True
+    pre_vlm_fuzzy_enabled: bool = True
+    pre_vlm_fuzzy_threshold: float = 92.0
+    pre_vlm_fuzzy_margin: float = 5.0
+    pre_vlm_cost_per_page_idr: float = 0.0
     langextract_provider: str = "openai"
     langextract_model: str = ""
     langextract_base_url: str = ""
@@ -107,21 +99,17 @@ class AppConfig:
             usd_to_idr=_config_float(values, "USD_TO_IDR", 18000.0),
             input_rate_per_million=default_input_rate,
             output_rate_per_million=default_output_rate,
-            vlm_input_rate_per_million=_config_float(
-                values, "VLM_INPUT_RATE_PER_MILLION", default_input_rate
-            ),
-            vlm_output_rate_per_million=_config_float(
-                values, "VLM_OUTPUT_RATE_PER_MILLION", default_output_rate
-            ),
-            langextract_input_rate_per_million=_config_float(
-                values, "LANGEXTRACT_INPUT_RATE_PER_MILLION", default_input_rate
-            ),
-            langextract_output_rate_per_million=_config_float(
-                values, "LANGEXTRACT_OUTPUT_RATE_PER_MILLION", default_output_rate
-            ),
-            usage_estimate_fallback=_config_bool(
-                values, "USAGE_ESTIMATE_FALLBACK", True
-            ),
+            vlm_input_rate_per_million=_config_float(values, "VLM_INPUT_RATE_PER_MILLION", default_input_rate),
+            vlm_output_rate_per_million=_config_float(values, "VLM_OUTPUT_RATE_PER_MILLION", default_output_rate),
+            langextract_input_rate_per_million=_config_float(values, "LANGEXTRACT_INPUT_RATE_PER_MILLION", default_input_rate),
+            langextract_output_rate_per_million=_config_float(values, "LANGEXTRACT_OUTPUT_RATE_PER_MILLION", default_output_rate),
+            usage_estimate_fallback=_config_bool(values, "USAGE_ESTIMATE_FALLBACK", True),
+            pre_vlm_mapping_enabled=_config_bool(values, "PRE_VLM_MAPPING_ENABLED", True),
+            pre_vlm_regex_enabled=_config_bool(values, "PRE_VLM_REGEX_ENABLED", True),
+            pre_vlm_fuzzy_enabled=_config_bool(values, "PRE_VLM_FUZZY_ENABLED", True),
+            pre_vlm_fuzzy_threshold=_config_float(values, "PRE_VLM_FUZZY_THRESHOLD", 92.0),
+            pre_vlm_fuzzy_margin=_config_float(values, "PRE_VLM_FUZZY_MARGIN", 5.0),
+            pre_vlm_cost_per_page_idr=_config_float(values, "PRE_VLM_COST_PER_PAGE_IDR", 0.0),
             langextract_provider=values.get("LANGEXTRACT_PROVIDER", "openai").lower(),
             langextract_model=values.get("LANGEXTRACT_MODEL", values.get("EXTRACTION_MODEL", legacy_model)),
             langextract_base_url=values.get("LANGEXTRACT_BASE_URL", values.get("BASE_URL", "")).rstrip("/"),
@@ -130,44 +118,18 @@ class AppConfig:
             langextract_batch_length=_config_int(values, "LANGEXTRACT_BATCH_LENGTH", 4),
             langextract_max_workers=_config_int(values, "LANGEXTRACT_MAX_WORKERS", 4),
             langextract_extraction_passes=_config_int(values, "LANGEXTRACT_EXTRACTION_PASSES", 1),
-            langextract_context_window_chars=_config_optional_int(
-                values,
-                "LANGEXTRACT_CONTEXT_WINDOW_CHARS",
-                None,
-            ),
-            langextract_use_output_schema=_config_bool(
-                values,
-                "LANGEXTRACT_USE_OUTPUT_SCHEMA",
-                True,
-            ),
-            langextract_enable_icd_suggestions=_config_bool(
-                values,
-                "LANGEXTRACT_ENABLE_ICD_SUGGESTIONS",
-                False,
-            ),
-            langextract_icd_suggestion_model=values.get(
-                "LANGEXTRACT_ICD_SUGGESTION_MODEL",
-                values.get("EXTRACTION_MODEL", legacy_model),
-            ),
-            langextract_show_progress=_config_bool(
-                values,
-                "LANGEXTRACT_SHOW_PROGRESS",
-                False,
-            ),
-            langextract_fallback_to_legacy=_config_bool(
-                values,
-                "LANGEXTRACT_FALLBACK_TO_LEGACY",
-                False,
-            ),
+            langextract_context_window_chars=_config_optional_int(values, "LANGEXTRACT_CONTEXT_WINDOW_CHARS", None),
+            langextract_use_output_schema=_config_bool(values, "LANGEXTRACT_USE_OUTPUT_SCHEMA", True),
+            langextract_enable_icd_suggestions=_config_bool(values, "LANGEXTRACT_ENABLE_ICD_SUGGESTIONS", False),
+            langextract_icd_suggestion_model=values.get("LANGEXTRACT_ICD_SUGGESTION_MODEL", values.get("EXTRACTION_MODEL", legacy_model)),
+            langextract_show_progress=_config_bool(values, "LANGEXTRACT_SHOW_PROGRESS", False),
+            langextract_fallback_to_legacy=_config_bool(values, "LANGEXTRACT_FALLBACK_TO_LEGACY", False),
         )
 
     def validate_for_langextract(self) -> None:
         supported_providers = {"openai", "gemini", "ollama"}
         if self.langextract_provider not in supported_providers:
-            raise ValueError(
-                "LANGEXTRACT_PROVIDER harus salah satu dari: "
-                + ", ".join(sorted(supported_providers))
-            )
+            raise ValueError("LANGEXTRACT_PROVIDER harus salah satu dari: " + ", ".join(sorted(supported_providers)))
         if not self.langextract_model:
             raise ValueError("Konfigurasi LangExtract belum lengkap: LANGEXTRACT_MODEL")
         if self.langextract_max_workers < 1:
@@ -179,77 +141,32 @@ class AppConfig:
         if self.langextract_batch_length < 1:
             raise ValueError("LANGEXTRACT_BATCH_LENGTH minimal 1")
         if self.langextract_provider in {"openai", "gemini"}:
-            resolved_key = (
-                self.langextract_api_key
-                or os.getenv("LANGEXTRACT_API_KEY")
-                or os.getenv("OPENAI_API_KEY")
-                or os.getenv("GEMINI_API_KEY")
-            )
+            resolved_key = self.langextract_api_key or os.getenv("LANGEXTRACT_API_KEY") or os.getenv("OPENAI_API_KEY") or os.getenv("GEMINI_API_KEY")
             if not resolved_key:
-                raise ValueError(
-                    "Konfigurasi LangExtract belum lengkap: LANGEXTRACT_API_KEY"
-                )
+                raise ValueError("Konfigurasi LangExtract belum lengkap: LANGEXTRACT_API_KEY")
 
-    def validate_for_llm(
-        self,
-        *,
-        require_vlm: bool = False,
-        require_extraction: bool = False,
-    ) -> None:
+    def validate_for_llm(self, *, require_vlm: bool = False, require_extraction: bool = False) -> None:
         models = {}
         if require_vlm:
             models["VLM_MODEL"] = self.vlm_model
         if require_extraction:
             models["EXTRACTION_MODEL"] = self.extraction_model
-        missing = [
-            name
-            for name, value in {
-                "BASE_URL": self.base_url,
-                "API_KEY": self.api_key,
-                **models,
-            }.items()
-            if not value
-        ]
+        missing = [name for name, value in {"BASE_URL": self.base_url, "API_KEY": self.api_key, **models}.items() if not value]
         if missing:
-            raise ValueError(
-                "Konfigurasi LLM belum lengkap: " + ", ".join(missing)
-            )
+            raise ValueError("Konfigurasi LLM belum lengkap: " + ", ".join(missing))
 
     def rates_for(self, stage: str) -> tuple[float, float]:
-        """Return ``(input_rate, output_rate)`` per million tokens for a stage.
-
-        Unrecognized stages fall back to the generic rates so a new caller
-        never silently costs a stage at zero.
-        """
         rates = {
             "vlm": (self.vlm_input_rate_per_million, self.vlm_output_rate_per_million),
-            "langextract": (
-                self.langextract_input_rate_per_million,
-                self.langextract_output_rate_per_million,
-            ),
+            "langextract": (self.langextract_input_rate_per_million, self.langextract_output_rate_per_million),
         }.get(stage)
         if rates is None:
             return (self.input_rate_per_million, self.output_rate_per_million)
-        return tuple(
-            value or fallback
-            for value, fallback in zip(
-                rates,
-                (self.input_rate_per_million, self.output_rate_per_million),
-            )
-        )
+        return tuple(value or fallback for value, fallback in zip(rates, (self.input_rate_per_million, self.output_rate_per_million)))
 
 
-def calculate_cost(
-    input_tokens: int,
-    output_tokens: int,
-    usd_to_idr: float = 18000,
-    input_rate_per_million: float = 0.25,
-    output_rate_per_million: float = 1.50,
-) -> dict[str, float]:
+def calculate_cost(input_tokens: int, output_tokens: int, usd_to_idr: float = 18000, input_rate_per_million: float = 0.25, output_rate_per_million: float = 1.50) -> dict[str, float]:
     input_cost_usd = (input_tokens / 1_000_000) * input_rate_per_million
     output_cost_usd = (output_tokens / 1_000_000) * output_rate_per_million
     total_cost_usd = input_cost_usd + output_cost_usd
-    return {
-        "usd": total_cost_usd,
-        "idr": total_cost_usd * usd_to_idr,
-    }
+    return {"usd": total_cost_usd, "idr": total_cost_usd * usd_to_idr}
