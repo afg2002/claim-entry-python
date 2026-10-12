@@ -59,6 +59,8 @@ class AppConfig:
     pre_vlm_fuzzy_enabled: bool = True
     pre_vlm_fuzzy_threshold: float = 92.0
     pre_vlm_fuzzy_margin: float = 5.0
+    pre_vlm_min_matches: int = 2
+    pre_vlm_min_coverage: float = 0.50
     pre_vlm_cost_per_page_idr: float = 0.0
     langextract_provider: str = "openai"
     langextract_model: str = ""
@@ -109,6 +111,8 @@ class AppConfig:
             pre_vlm_fuzzy_enabled=_config_bool(values, "PRE_VLM_FUZZY_ENABLED", True),
             pre_vlm_fuzzy_threshold=_config_float(values, "PRE_VLM_FUZZY_THRESHOLD", 92.0),
             pre_vlm_fuzzy_margin=_config_float(values, "PRE_VLM_FUZZY_MARGIN", 5.0),
+            pre_vlm_min_matches=_config_int(values, "PRE_VLM_MIN_MATCHES", 2),
+            pre_vlm_min_coverage=_config_float(values, "PRE_VLM_MIN_COVERAGE", 0.50),
             pre_vlm_cost_per_page_idr=_config_float(values, "PRE_VLM_COST_PER_PAGE_IDR", 0.0),
             langextract_provider=values.get("LANGEXTRACT_PROVIDER", "openai").lower(),
             langextract_model=values.get("LANGEXTRACT_MODEL", values.get("EXTRACTION_MODEL", legacy_model)),
