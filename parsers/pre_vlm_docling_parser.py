@@ -2,20 +2,20 @@
 
 A cheap RapidOCR pass runs before Remote VLM. Regex and RapidFuzz inspect the
 OCR text for known claim-form labels. If enough fields are confidently mapped,
-the remote VLM OCR stage is skipped and the existing local OCR + LangExtract
-path is used. Otherwise the original Remote VLM path is preserved unchanged.
+the remote VLM OCR stage is skipped. Otherwise the original Remote VLM path is
+preserved unchanged.
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
 from config import AppConfig
 from services.pre_vlm_mapping import DEFAULT_ALIASES, map_fields, summarize_cost_saving
-from services.pre_vlm_ui import render_result, with_ui_overrides
+from services.pre_vlm_ui import with_ui_overrides
 from .docling_parser import parse_docling as _parse_docling
-
 
 PRE_VLM_FIELDS = tuple(DEFAULT_ALIASES.keys())
 
@@ -27,7 +27,6 @@ def _run_preflight(
     *,
     analyze_all_pages: bool,
 ) -> dict[str, Any]:
-    """Run only local OCR and score whether remote VLM is necessary."""
     if not config.pre_vlm_mapping_enabled:
         return {
             "enabled": False,
@@ -36,7 +35,6 @@ def _run_preflight(
             "fields": {},
         }
 
-    # OCR must stay local here. This call cannot hit the remote model.
     result = _parse_docling(
         source,
         output_dir / "pre_vlm",
@@ -70,7 +68,6 @@ def _run_preflight(
         len(confident) >= config.pre_vlm_min_matches
         and coverage >= config.pre_vlm_min_coverage
     )
-
     return {
         "enabled": True,
         "should_use_vlm": should_use_vlm,
@@ -101,8 +98,9 @@ def parse_docling(
     source = Path(file_path).resolve()
     out = Path(output_dir).resolve()
 
-    # Streamlit controls are optional. Non-Streamlit callers simply receive
-    # the config from the file as before.
+    # Direct/non-Streamlit callers can still use config.properties. The main
+    # Streamlit app renders the widgets once before processing; this call only
+    # reads the already-created widget state.
     if ocr_engine == "Remote VLM":
         config = with_ui_overrides(config)
 
@@ -142,7 +140,6 @@ def parse_docling(
         skipped_pages,
         estimated_vlm_cost_per_page_idr=config.pre_vlm_cost_per_page_idr,
     )
-
     json_data = result.setdefault("json_data", {})
     json_data["pre_vlm_mapping"] = {
         **preflight,
@@ -152,18 +149,12 @@ def parse_docling(
     result["pre_vlm_mapping"] = json_data["pre_vlm_mapping"]
     result["json_data"] = json_data
 
-    # Keep the audit trail in the generated JSON/markdown metadata without
-    # changing the existing claim contract.
-    artifacts = result.get("artifacts") or {}
-    json_path = artifacts.get("json_path")
+    json_path = (result.get("artifacts") or {}).get("json_path")
     if json_path:
-        import json
         path = Path(json_path)
         if path.exists():
             path.write_text(
                 json.dumps(json_data, ensure_ascii=False, indent=2, default=str),
                 encoding="utf-8",
             )
-
-    render_result(json_data["pre_vlm_mapping"])
     return result
