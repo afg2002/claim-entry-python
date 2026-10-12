@@ -58,8 +58,10 @@ def _run_preflight(
     fields = map_fields(
         markdown,
         PRE_VLM_FIELDS,
-        fuzzy_threshold=config.pre_vlm_fuzzy_threshold if config.pre_vlm_fuzzy_enabled else 101.0,
+        fuzzy_threshold=config.pre_vlm_fuzzy_threshold,
         fuzzy_margin=config.pre_vlm_fuzzy_margin,
+        regex_enabled=config.pre_vlm_regex_enabled,
+        fuzzy_enabled=config.pre_vlm_fuzzy_enabled,
     )
     confident = [item for item in fields.values() if not item["needs_vlm"]]
     coverage = len(confident) / len(fields) if fields else 0.0
@@ -73,6 +75,8 @@ def _run_preflight(
         "should_use_vlm": should_use_vlm,
         "reason": "mapping_confident" if not should_use_vlm else "mapping_insufficient",
         "ocr_engine": "RapidOCR",
+        "regex_enabled": config.pre_vlm_regex_enabled,
+        "fuzzy_enabled": config.pre_vlm_fuzzy_enabled,
         "fields": fields,
         "matched_fields": len(confident),
         "total_fields": len(fields),
@@ -150,6 +154,9 @@ def parse_docling(
         import json
         path = Path(json_path)
         if path.exists():
-            path.write_text(json.dumps(json_data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+            path.write_text(
+                json.dumps(json_data, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
 
     return result
