@@ -107,17 +107,23 @@ def map_field(
     aliases: Mapping[str, Iterable[str]] | None = None,
     fuzzy_threshold: float = 92.0,
     fuzzy_margin: float = 5.0,
+    regex_enabled: bool = True,
+    fuzzy_enabled: bool = True,
 ) -> MappingResult:
     """Map one field label in OCR text without invoking an LLM."""
     normalized = normalize_text(text)
     if not normalized:
         return MappingResult(field, None, "empty", 0.0, needs_vlm=True)
 
-    regex_value = _regex_extract(normalized, field)
-    if regex_value:
-        return MappingResult(
-            field, regex_value, "regex", 100.0, needs_vlm=False, evidence=regex_value
-        )
+    if regex_enabled:
+        regex_value = _regex_extract(normalized, field)
+        if regex_value:
+            return MappingResult(
+                field, regex_value, "regex", 100.0, needs_vlm=False, evidence=regex_value
+            )
+
+    if not fuzzy_enabled:
+        return MappingResult(field, None, "fuzzy_disabled", 0.0, needs_vlm=True)
 
     if process is None or fuzz is None:
         return MappingResult(field, None, "rapidfuzz_unavailable", 0.0, needs_vlm=True)
@@ -126,15 +132,16 @@ def map_field(
     if not candidates:
         return MappingResult(field, None, "no_alias", 0.0, needs_vlm=True)
 
-    # Search each line first: fuzzy matching a whole page against a short label
-    # is noisy and can incorrectly skip VLM.
-    lines = [line.strip() for line in normalized.splitlines() if line.strip()]
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
     if not lines:
         lines = [normalized]
     choices = {alias: alias for alias in candidates}
     best: tuple[float, str, str] | None = None
     second = 0.0
-    for line in lines:
+    for raw_line in lines:
+        line = normalize_text(raw_line)
+        if not line:
+            continue
         result = process.extract(line, choices, scorer=fuzz.token_set_ratio, limit=2)
         if not result:
             continue
@@ -142,7 +149,7 @@ def map_field(
         if best is None or score > best[0]:
             if best is not None:
                 second = max(second, best[0])
-            best = (score, alias, line)
+            best = (score, alias, raw_line.strip())
         elif score > second:
             second = score
 
@@ -169,6 +176,8 @@ def map_fields(
     aliases: Mapping[str, Iterable[str]] | None = None,
     fuzzy_threshold: float = 92.0,
     fuzzy_margin: float = 5.0,
+    regex_enabled: bool = True,
+    fuzzy_enabled: bool = True,
 ) -> dict[str, dict[str, Any]]:
     return {
         field: map_field(
@@ -177,6 +186,8 @@ def map_fields(
             aliases=aliases,
             fuzzy_threshold=fuzzy_threshold,
             fuzzy_margin=fuzzy_margin,
+            regex_enabled=regex_enabled,
+            fuzzy_enabled=fuzzy_enabled,
         ).as_dict()
         for field in fields
     }
