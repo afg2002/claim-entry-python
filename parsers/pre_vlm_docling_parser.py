@@ -2,8 +2,8 @@
 
 A cheap RapidOCR pass runs before Remote VLM. Regex and RapidFuzz inspect the
 OCR text for known claim-form labels. If enough fields are confidently mapped,
-the remote VLM OCR stage is skipped. Otherwise the original Remote VLM path is
-preserved unchanged.
+the remote VLM OCR stage is skipped and the existing local OCR + LangExtract
+path is used. Otherwise the original Remote VLM path is preserved unchanged.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import Any
 
 from config import AppConfig
 from services.pre_vlm_mapping import DEFAULT_ALIASES, map_fields, summarize_cost_saving
-from services.pre_vlm_ui import with_ui_overrides
+from services.pre_vlm_ui import render_result
 from .docling_parser import parse_docling as _parse_docling
 
 PRE_VLM_FIELDS = tuple(DEFAULT_ALIASES.keys())
@@ -27,6 +27,7 @@ def _run_preflight(
     *,
     analyze_all_pages: bool,
 ) -> dict[str, Any]:
+    """Run only local OCR and score whether remote VLM is necessary."""
     if not config.pre_vlm_mapping_enabled:
         return {
             "enabled": False,
@@ -98,12 +99,8 @@ def parse_docling(
     source = Path(file_path).resolve()
     out = Path(output_dir).resolve()
 
-    # Direct/non-Streamlit callers can still use config.properties. The main
-    # Streamlit app renders the widgets once before processing; this call only
-    # reads the already-created widget state.
-    if ocr_engine == "Remote VLM":
-        config = with_ui_overrides(config)
-
+    # The Streamlit app renders the controls once before processing and passes
+    # the resulting AppConfig here. Non-Streamlit callers use config.properties.
     if ocr_engine != "Remote VLM" or not config.pre_vlm_mapping_enabled:
         return _parse_docling(
             source,
@@ -157,4 +154,6 @@ def parse_docling(
                 json.dumps(json_data, ensure_ascii=False, indent=2, default=str),
                 encoding="utf-8",
             )
+
+    render_result(json_data["pre_vlm_mapping"])
     return result
