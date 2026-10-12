@@ -1,13 +1,9 @@
-"""Streamlit entrypoint with stable Pre-VLM controls.
-
-The main UI lives in ``app_core``.  Streamlit reruns this entrypoint on every
-interaction, so ``app_core`` must be reloaded explicitly; a normal ``import``
-would execute it only once and can leave the page blank after a widget change.
-"""
+"""Streamlit entrypoint with stable Pre-VLM controls."""
 
 from __future__ import annotations
 
 import importlib
+import sys
 
 import streamlit as st
 
@@ -32,15 +28,14 @@ _original_set_page_config = st.set_page_config
 AppConfig.from_file = classmethod(lambda cls, path="config.properties": ui_config)
 st.set_page_config = lambda *args, **kwargs: None
 try:
-    try:
-        import app_core
-    except ImportError:
-        # Preserve the normal traceback for genuine application import errors.
-        raise
+    if "app_core" in sys.modules:
+        # Streamlit reruns the script in the same Python process. Reload the
+        # cached module so the main UI is rebuilt with the latest config.
+        importlib.reload(sys.modules["app_core"])
     else:
-        # Streamlit reruns the script in the same Python process. A plain
-        # ``import app_core`` would therefore skip the main UI on reruns.
-        importlib.reload(app_core)
+        # First execution: import exactly once. Do NOT import and reload in
+        # the same run, otherwise Streamlit sees duplicate widget elements.
+        import app_core  # noqa: F401,E402
 finally:
     AppConfig.from_file = _original_from_file_descriptor
     st.set_page_config = _original_set_page_config
