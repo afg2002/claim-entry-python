@@ -13,6 +13,7 @@ from typing import Any
 
 from config import AppConfig
 from services.pre_vlm_mapping import DEFAULT_ALIASES, map_fields, summarize_cost_saving
+from services.pre_vlm_ui import render_result, with_ui_overrides
 from .docling_parser import parse_docling as _parse_docling
 
 
@@ -100,6 +101,11 @@ def parse_docling(
     source = Path(file_path).resolve()
     out = Path(output_dir).resolve()
 
+    # Streamlit controls are optional. Non-Streamlit callers simply receive
+    # the config from the file as before.
+    if ocr_engine == "Remote VLM":
+        config = with_ui_overrides(config)
+
     if ocr_engine != "Remote VLM" or not config.pre_vlm_mapping_enabled:
         return _parse_docling(
             source,
@@ -159,4 +165,5 @@ def parse_docling(
                 encoding="utf-8",
             )
 
+    render_result(json_data["pre_vlm_mapping"])
     return result
