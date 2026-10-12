@@ -20,7 +20,7 @@ ui_config = with_ui_overrides(base_config)
 
 # app_core creates its own AppConfig at import time. Inject the exact config
 # selected in the sidebar so parser execution uses the same UI state.
-_original_from_file = AppConfig.from_file
+_original_from_file_descriptor = AppConfig.__dict__["from_file"]
 _original_set_page_config = st.set_page_config
 
 AppConfig.from_file = classmethod(lambda cls, path="config.properties": ui_config)
@@ -28,5 +28,5 @@ st.set_page_config = lambda *args, **kwargs: None
 try:
     import app_core  # noqa: F401,E402
 finally:
-    AppConfig.from_file = _original_from_file
+    AppConfig.from_file = _original_from_file_descriptor
     st.set_page_config = _original_set_page_config
