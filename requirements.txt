@@ -12,3 +12,4 @@ docling>=2.70,<3
 opendataloader-pdf>=1,<2
 mineru[all]>=3,<4
 marker-pdf>=2,<3
+rapidfuzz>=3.9,<4
