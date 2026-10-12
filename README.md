@@ -1,163 +1,495 @@
-# Document Parser Comparison Lab v2
+# Claim Entry Python
 
-## Windows setup
+> **AI-assisted document understanding for insurance claims** — parse messy claim documents, extract grounded facts, validate them, and produce a clean structured claim form.
 
-```powershell
-cd document-parser-comparison-streamlit-v2
-py -3.12 -m venv .venv
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip uv
-uv pip install -r requirements.txt
-java -version
-mineru --help
-python -m streamlit run app.py
+[![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-App-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
+[![Docling](https://img.shields.io/badge/Parser-Docling-111827)](https://github.com/docling-project/docling)
+[![LangExtract](https://img.shields.io/badge/Extraction-LangExtract-111827)](https://github.com/google/langextract)
+[![License](https://img.shields.io/badge/License-Internal-lightgrey)](#license)
+
+## Why this project?
+
+Insurance claim documents rarely arrive as one clean, structured form. A single submission can contain scanned forms, receipts, medical reports, prescriptions, invoices, and supporting documents.
+
+**Claim Entry Python** turns that document bundle into structured, auditable data without treating the LLM as the source of truth.
+
+The core principle is simple:
+
+> **Extract facts from the document first. Derive business insights separately. Never invent missing values.**
+
+---
+
+## ✨ Highlights
+
+- 📄 **Multi-parser document pipeline** — Docling and MinerU can be compared from the UI.
+- 👁️ **OCR + layout understanding** — remote VLM or local OCR depending on the selected pipeline.
+- 🧩 **Grounded extraction** — LangExtract works on the complete Markdown produced by the document stage.
+- 🔎 **Provenance-first** — extracted values retain source spans, offsets, alignment status, and page hints where available.
+- 🧠 **Deterministic business logic** — grouping, normalization, validation, and derived fields are handled in Python.
+- 🏥 **Claim-aware schema** — member, policy, claim, visit, provider, medical, financial, medication, procedure, and laboratory data.
+- 💰 **Usage & cost tracking** — reported and estimated token usage are kept separate.
+- 🛡️ **No silent fallback by default** — extraction failures do not quietly become apparently valid claim data.
+- 🧪 **Offline test suite** — core tests do not require network/API access.
+- 📦 **Audit-friendly output** — compact claim-form JSON plus the complete contract are preserved.
+
+---
+
+## 🏗️ Architecture
+
+```text
+                         ┌──────────────────┐
+                         │   PDF / Images   │
+                         └────────┬─────────┘
+                                  │
+                                  ▼
+                    ┌──────────────────────────┐
+                    │ Document Parsing / OCR   │
+                    │                          │
+                    │ Docling Remote VLM       │
+                    │            OR            │
+                    │ MinerU / Local OCR       │
+                    └────────────┬─────────────┘
+                                 │
+                                 ▼
+                         ┌───────────────┐
+                         │    Markdown   │
+                         └───────┬───────┘
+                                 │
+                                 ▼
+                    ┌──────────────────────────┐
+                    │       LangExtract        │
+                    │                          │
+                    │ Grounded claim facts    │
+                    │ + source spans          │
+                    └────────────┬─────────────┘
+                                 │
+                                 ▼
+                    ┌──────────────────────────┐
+                    │ Python Claim Pipeline    │
+                    │                          │
+                    │ Grouping                 │
+                    │ Normalization            │
+                    │ Validation               │
+                    │ Derived analysis         │
+                    └────────────┬─────────────┘
+                                 │
+                  ┌──────────────┴──────────────┐
+                  ▼                             ▼
+          ┌───────────────┐             ┌────────────────┐
+          │ Claim Facts   │             │ Claim Form JSON│
+          │ + provenance  │             │ compact output │
+          └───────────────┘             └────────────────┘
 ```
 
-Gunakan Marker mode `fast` untuk CPU Windows. Mode `balanced` membutuhkan resource inference yang lebih berat. Marker menghasilkan Markdown dan JSON terstruktur untuk PDF. Gunakan MinerU backend `pipeline` untuk CPU Windows. Aplikasi menyimpan upload sebagai nama internal pendek agar menghindari trailing-space dan MAX_PATH pada Windows. Live log MinerU dibaca melalui `subprocess.Popen`. Progress halaman hanya presisi jika versi MinerU mencetak `page x/y`; jika tidak, UI menampilkan elapsed time, tahap, dan indikator aktivitas.
+### Extraction philosophy
 
-## Pipeline claim dengan LangExtract
+The pipeline intentionally separates **facts** from **analysis**:
 
-Default claim flow pada aplikasi ini adalah:
+```text
+Document
+   ↓
+Grounded facts
+   ↓
+Normalized facts
+   ↓
+Business relationships
+   ↓
+Derived analysis
+```
+
+This prevents an LLM-generated interpretation from being accidentally promoted into a document fact.
+
+---
+
+## 🔄 Claim extraction flow
+
+The default insurance-claim flow is:
 
 ```text
 PDF
-  -> Docling Remote VLM (hanya OCR/layout/table -> Markdown)
-  -> LangExtract (Markdown penuh -> grounded extraction items)
-  -> Python grouping/normalization/validation
-  -> analyst_analysis
-  -> final structured JSON
+  → Docling Remote VLM
+  → Markdown
+  → LangExtract
+  → Grounded extraction items
+  → Python grouping / normalization / validation
+  → Claim Analysis
+  → Structured Claim JSON
 ```
 
-LangExtract tidak menerima gambar halaman dan tidak menggantikan tahap parser. `services/langextract_service.py` mengirim seluruh Markdown tanpa keyword filtering. Setiap item menyimpan `extraction_text`, `char_start`, `char_end`, source excerpt, page hint bila marker halaman tersedia, alignment status, dan status grounding. Item tanpa interval disimpan sebagai diagnostic dan tidak masuk `claim_data`.
+LangExtract does **not** receive page images. It receives the complete Markdown generated by the document/VLM stage.
 
-### Pilih parser di Streamlit
+Each extracted item can retain:
 
-Sidebar `Parser PDF/Markdown` mendukung:
+- `extraction_text`
+- `char_start`
+- `char_end`
+- source excerpt
+- page hint when page markers are available
+- alignment status
+- grounding status
+- deterministic extraction ID
 
-- **Docling** — Remote VLM/API untuk tahap OCR/layout/table → Markdown, lalu LangExtract.
-- **MinerU** — `mineru -b pipeline` lokal untuk OCR/layout/table → Markdown, lalu LangExtract.
-- Keduanya dapat dipilih bersamaan untuk membandingkan Markdown dan waktu/hasil extraction.
+Items without a valid source interval are treated as diagnostics and are **not promoted into `claim_data`**.
 
-### Upload beberapa dokumen
+---
 
-Pilih beberapa file sekaligus, lalu pilih mode pemrosesan:
+## 🧰 Supported parsers
 
-- **Pisah per file** — setiap dokumen mendapat hasil Markdown dan extraction sendiri. File yang formatnya tidak didukung parser akan ditandai gagal tanpa menghentikan file lain.
-- **Gabung Markdown saja** — tiap file tetap diekstrak sendiri; Markdown yang berhasil kemudian digabung per parser untuk preview/download. Jika ada file gagal, hasil gabungan diberi peringatan.
-- **Gabung sebagai satu claim** — OCR dijalankan untuk semua file, Markdown digabung dengan nama sumber dan nomor halaman gabungan, lalu LangExtract dijalankan sekali per parser. Jika salah satu file gagal, claim gabungan parser tersebut dibatalkan.
+| Parser | OCR / Layout | Output | Remote model | Best use |
+|---|---|---|---|---|
+| **Docling** | Remote VLM / Docling | Markdown + structured data | Optional | Complex PDFs, layout, tables |
+| **MinerU** | Local pipeline | Markdown | No | CPU/local comparison |
 
-Mode gabung hanya menawarkan parser yang mendukung semua file terpilih. Artifact tiap sumber dan artifact gabungan tetap tersedia di ZIP.
+The Streamlit application can run the parsers independently or compare their output, processing time, and extraction results.
 
-MinerU sengaja tidak memakai `mineru-api` dan tidak memakai VLM/API. Jika `LANGEXTRACT` gagal, proses MinerU ditandai error agar Markdown tidak diam-diam dianggap sudah terekstraksi; periksa credential/model LangExtract dan log.
+### MinerU on Windows
 
-### Konfigurasi
+For CPU Windows environments, use the `pipeline` backend. The application intentionally does not use `mineru-api` or a remote VLM for this path.
 
-Salin `config.properties.example` menjadi `config.properties`, lalu isi API key/gateway. Parameter penting:
+---
 
-- `LANGEXTRACT_PROVIDER`: `openai`, `gemini`, atau `ollama`.
-- `LANGEXTRACT_MODEL`: model extraction; model ini terpisah dari `VLM_MODEL`.
-- `LANGEXTRACT_MAX_CHAR_BUFFER`: 1500–3000 adalah titik awal untuk klaim; nilai terlalu kecil memecah relasi, terlalu besar mengurangi konteks.
-- `LANGEXTRACT_MAX_WORKERS`: mulaikan 2–4; naikkan hanya setelah rate limit dan biaya diukur.
-- `LANGEXTRACT_BATCH_LENGTH`: minimal `max_workers`; adapter otomatis menaikkan nilai yang lebih kecil.
-- `LANGEXTRACT_EXTRACTION_PASSES`: 1 untuk operasi normal, 2 untuk dokumen sulit dengan biaya lebih tinggi.
-- `LANGEXTRACT_CONTEXT_WINDOW_CHARS`: konteks chunk sebelumnya, opsional.
-- `LANGEXTRACT_USE_OUTPUT_SCHEMA`: `true` untuk OpenAI/Gemini. `output_schema` dibatasi oleh adapter/provider; Ollama menggunakan mode examples/prompt-only.
-- `LANGEXTRACT_ENABLE_ICD_SUGGESTIONS`: default `false`. Jika diaktifkan, pass kedua yang terisolasi hanya menulis ke `analyst_analysis.icd_suggestions`; kode suggestion tidak pernah masuk `document_icd_code`.
-- `LANGEXTRACT_FALLBACK_TO_LEGACY`: default `false` agar kegagalan tidak diam-diam kembali ke extractor giant-JSON lama.
+## 📁 Project structure
 
-### Token usage dan biaya
+```text
+claim-entry-python/
+├── app.py                         # Streamlit application
+├── config.py                      # Application configuration
+├── config.properties.example      # Configuration template
+├── requirements.txt               # Python dependencies
+│
+├── parsers/
+│   ├── docling_parser.py          # Docling pipeline
+│   ├── mineru_parser.py           # MinerU pipeline
+│   └── marker_parser.py           # Marker parser
+│
+├── services/
+│   ├── langextract_service.py     # Grounded claim extraction
+│   ├── llm_service.py             # Legacy / remote VLM extraction
+│   ├── claim_fields.py             # Claim field definitions
+│   ├── claim_form.py               # Compact claim-form builder
+│   ├── claim_rules.py              # Business rules
+│   ├── assessment_service.py       # Derived claim analysis
+│   ├── page_classifier.py          # Page classification
+│   └── usage_tracker.py             # Token / cost accounting
+│
+├── schemas/
+│   ├── claim_facts.py              # Claim fact models
+│   ├── claim_pipeline.py           # Final contract validation
+│   ├── claim_rulebook.py           # Claim rules
+│   └── native.py                   # Native schemas
+│
+├── comparison/                     # Parser comparison utilities
+├── tests/                           # Offline test suite
+├── docs/                            # Developer documentation
+└── output/                          # Generated artifacts
+```
 
-Setiap dokumen menyimpan usage per tahap di `output/<parser>/<nama>.json` pada key `usage`, dan UI menampilkannya di tab **Usage & Biaya**.
+---
+
+## 🚀 Quick start
+
+### 1. Clone
+
+```powershell
+git clone https://github.com/afg2002/claim-entry-python.git
+cd claim-entry-python
+```
+
+### 2. Create virtual environment
+
+```powershell
+py -3.12 -m venv .venv
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+```
+
+### 3. Install dependencies
+
+```powershell
+python -m pip install --upgrade pip uv
+uv pip install -r requirements.txt
+```
+
+### 4. Configure the application
+
+```powershell
+Copy-Item config.properties.example config.properties
+```
+
+Edit `config.properties` and provide the required provider/API configuration.
+
+### 5. Run Streamlit
+
+```powershell
+python -m streamlit run app.py
+```
+
+Then open the local Streamlit URL shown in the terminal.
+
+---
+
+## ⚙️ Configuration
+
+The most important settings are:
+
+| Variable | Purpose |
+|---|---|
+| `LANGEXTRACT_PROVIDER` | Extraction provider: `openai`, `gemini`, or `ollama` |
+| `LANGEXTRACT_MODEL` | Model used for claim extraction |
+| `VLM_MODEL` | Model used by the Docling Remote VLM stage |
+| `LANGEXTRACT_MAX_CHAR_BUFFER` | Chunk size for LangExtract |
+| `LANGEXTRACT_MAX_WORKERS` | Extraction concurrency |
+| `LANGEXTRACT_BATCH_LENGTH` | Batch size for extraction |
+| `LANGEXTRACT_EXTRACTION_PASSES` | Number of extraction passes |
+| `LANGEXTRACT_CONTEXT_WINDOW_CHARS` | Optional previous-context window |
+| `LANGEXTRACT_USE_OUTPUT_SCHEMA` | Enable provider schema/output constraints where supported |
+| `LANGEXTRACT_ENABLE_ICD_SUGGESTIONS` | Enable isolated ICD suggestion pass |
+| `LANGEXTRACT_FALLBACK_TO_LEGACY` | Allow legacy extractor fallback |
+| `USAGE_ESTIMATE_FALLBACK` | Estimate missing token usage locally |
+
+### Recommended starting values
+
+```properties
+LANGEXTRACT_MAX_CHAR_BUFFER=2000
+LANGEXTRACT_MAX_WORKERS=2
+LANGEXTRACT_BATCH_LENGTH=2
+LANGEXTRACT_EXTRACTION_PASSES=1
+LANGEXTRACT_USE_OUTPUT_SCHEMA=true
+LANGEXTRACT_FALLBACK_TO_LEGACY=false
+USAGE_ESTIMATE_FALLBACK=true
+```
+
+Tune concurrency and buffer size only after measuring rate limits, latency, extraction quality, and cost.
+
+---
+
+## 📊 Token usage & cost tracking
+
+Every processed document can contain usage information for each stage:
 
 ```json
-"usage": {
-  "vlm_ocr":     { "stage": "vlm_ocr",     "input_tokens": 0, "output_tokens": 0 },
-  "extraction":  { "stage": "langextract", "input_tokens": 0, "output_tokens": 0 },
-  "total":       { "stage": "document_total", "input_tokens": 0, "output_tokens": 0 }
+{
+  "usage": {
+    "vlm_ocr": {
+      "stage": "vlm_ocr",
+      "input_tokens": 0,
+      "output_tokens": 0
+    },
+    "extraction": {
+      "stage": "langextract",
+      "input_tokens": 0,
+      "output_tokens": 0
+    },
+    "total": {
+      "stage": "document_total",
+      "input_tokens": 0,
+      "output_tokens": 0
+    }
+  }
 }
 ```
 
-Dua sumber angka selalu dipisahkan dan tidak pernah dicampur:
+The project deliberately separates:
 
-- `reported` — angka apa adanya dari blok `usage` provider.
-- `estimated` — perkiraan `tiktoken` untuk bagian yang tidak dilaporkan provider.
-- `source` — `provider`, `estimated`, `mixed`, atau `none`.
+- **`reported`** — usage returned by the provider.
+- **`estimated`** — local estimate when the provider does not expose usage.
+- **`source`** — `provider`, `estimated`, `mixed`, or `none`.
 
-Angka `estimated` **bukan tagihan aktual** dan selalu ditandai demikian di UI. Halaman VLM berupa gambar, sehingga sisi input tidak dapat ditokenisasi lokal; hanya sisi output Markdown yang diestimasi dalam kasus itu.
+Estimated usage is **not an actual provider bill**.
 
-Sumber data per tahap:
+---
 
-- **VLM/OCR** — Docling sudah mencatat payload `usage` gateway per halaman di `ConversionResult.pages[*].predictions.vlm_response.usage`, dan aplikasi menjumlahkannya.
-- **LLM extraction** — LangExtract membuang payload `usage` provider, jadi `services/langextract_service.py` membungkus SDK client yang sudah dibuat adapter untuk merekam setiap respons. Hook ini berada di satu file dan aman: bila bentuk client berubah, tahap turun ke estimasi, tidak error.
-- **OCR lokal / MinerU** — tidak memanggil model remote, sehingga dilaporkan `source=none` dengan alasannya, bukan baris nol yang terlihat seperti inference gratis.
+## 🧾 Output contract
 
-Tarif per tahap (opsional, default ke `INPUT_RATE_PER_MILLION`/`OUTPUT_RATE_PER_MILLION`):
-
-- `VLM_INPUT_RATE_PER_MILLION`, `VLM_OUTPUT_RATE_PER_MILLION`
-- `LANGEXTRACT_INPUT_RATE_PER_MILLION`, `LANGEXTRACT_OUTPUT_RATE_PER_MILLION`
-- `USAGE_ESTIMATE_FALLBACK` — `true` (default) memakai estimasi tiktoken bila provider diam; `false` menampilkan "tidak tersedia".
-
-### Kontrak output
-
-`claim_data` berisi fakta eksplisit saja. Nilai source tetap dipertahankan; tanggal/angka yang sudah diparse placed in `normalized_claim_data`. Relasi disimpan sebagai grouped records (`diagnosis_records`, `medication_records`, `invoice_records`, `lab_results`) dan provenance item tetap tersedia untuk penelusuran. `analyst_analysis` hanya berisi derived/analyst output dengan `status`, evidence, dan confidence type. `schemas/claim_pipeline.py` menyediakan validasi Pydantic dan JSON Schema untuk kontrak final.
-
-### JSON ringkas (claim form)
-
-JSON yang dibaca user bentuknya mengikuti formulir klaim, bukan dump kontrak:
+The compact output follows the claim form instead of exposing a raw LLM dump:
 
 ```json
 {
   "schema_version": "claim-form-v1",
-  "document":       { "total_pages": 2, "pages": [ { "page": 1, "document_type": "Formulir Pengajuan Klaim", "category": "formulir_klaim", "label": "FORMULIR PENGAJUAN KLAIM" } ] },
-  "member_info":    { "insured_name": "…", "dob": "…", "patient_id": "…", "mobile_phone": "…" },
-  "policy_info":    { "policy_holder_name": "…", "policy_number": "…" },
-  "claim":          { "claim_case_type": "new", "account_no": "…", "received_date": "…" },
-  "visit":          { "type_of_visit": "outpatient", "status": "derived", "method": "outpatient_receipt_evidence" },
-  "provider":       { "provider_name": "…", "doctor_names": ["…"] },
-  "medical":        { "reason_of_visit": "…", "icd_codes": [], "icd_recommendations": [] },
-  "financial":      { "amount_incurred": 1215882, "currency": "IDR", "exchange_rate": 1 },
-  "service_lines":  [ { "no_of_days": 0, "incurred_amount": 1215882 } ],
-  "medications": [], "procedures": [], "lab_results": [],
-  "review":         { "needs_attention": ["…"] }
+  "document": {
+    "total_pages": 2,
+    "pages": []
+  },
+  "member_info": {
+    "insured_name": "…",
+    "dob": "…",
+    "patient_id": "…",
+    "mobile_phone": "…"
+  },
+  "policy_info": {
+    "policy_holder_name": "…",
+    "policy_number": "…"
+  },
+  "claim": {
+    "claim_case_type": "new",
+    "account_no": "…",
+    "received_date": "…"
+  },
+  "visit": {
+    "type_of_visit": "outpatient",
+    "status": "derived"
+  },
+  "provider": {
+    "provider_name": "…",
+    "doctor_names": []
+  },
+  "medical": {
+    "reason_of_visit": "…",
+    "icd_codes": [],
+    "icd_recommendations": []
+  },
+  "financial": {
+    "amount_incurred": 1215882,
+    "currency": "IDR",
+    "exchange_rate": 1
+  },
+  "service_lines": [],
+  "medications": [],
+  "procedures": [],
+  "lab_results": [],
+  "review": {
+    "needs_attention": []
+  }
 }
 ```
 
-### Docling confidence scores
+### Data integrity rules
 
-Jika versi dan pipeline Docling menyediakannya, report dari `ConversionResult.confidence` disimpan di dua tempat: `json_data.confidence` untuk akses cepat dan `json_data.docling_document.confidence` bersama raw document. Report mencakup `mean_grade`/`low_grade`, component scores (`layout_score`, `ocr_score`, `parse_score`, `table_score`), dan score per halaman. Tab **Raw OCR** menampilkan ringkasan serta tabel per halaman. Nilai yang tidak tersedia ditulis `null`, bukan dianggap score nol. Mengikuti dokumentasi Docling, gunakan grade sebagai ringkasan kualitas; score numerik bersifat informational dan dapat berubah.
+**No hallucinated numbers.** Values are sourced from `claim_data` or `normalized_claim_data`.
 
-Aturan yang dijaga:
+**Missing values stay `null`.** The JSON shape remains stable between runs.
 
-- **Tidak ada angka karangan.** Nilai disalin dari `claim_data`/`normalized_claim_data`. `currency` dan `exchange_rate` memakai default formulir (IDR, 1) dan ditandai `currency_status`/`exchange_rate_status = "default"` agar tidak disalahbaca sebagai fakta dokumen.
-- **Tipe kunjungan bisa dibaca dari dokumen pendukung.** Selain label eksplisit dan pasangan tanggal masuk/keluar, `resume`/`surat keluar` menandakan rawat inap dan `kwitansi` tunggal menandakan rawat jalan. Bundle campuran tetap `unknown` — sistem tidak menebak.
-- **`reason_of_visit` disusun deterministik** dari fakta yang sudah ter-grounding, bukan hasil karangan model. Untuk rawat inap memakai periode inap; rawat jalan lebih ringkas. Bila datanya kurang, statusnya `unknown` dengan catatan, bukan kalimat yang terdengar lengkap tapi kosong.
-- **Rekomendasi ICD tidak pernah masuk `icd_codes`.** Pass ICD berjalan otomatis hanya bila ada diagnosis dan dokumen tidak menulis kode ICD; hasilnya berstatus `derived` di `icd_recommendations` dan tetap perlu validasi coder.
-- **Field kosong tetap ditulis `null`** supaya bentuk JSON stabil antar-run dan aman untuk diff.
+**Derived values stay separate.** Analysis does not overwrite document facts.
 
-Kontrak lengkap yang lama tidak hilang: ditulis ke `<nama>.full.json` dan tetap tersedia di tab JSON lewat `information_extraction`, sehingga audit dan regression tetap aman.
+**ICD suggestions are not ICD codes.** Suggestions live in `icd_recommendations` and require coder validation.
 
-[`docs/langextract_claim_developer_guide.md`](docs/langextract_claim_developer_guide.md) adalah checklist developer untuk menambah field baru, relationship, normalisasi, provenance, test, dan dokumentasi.
+**Default values are explicit.** For example, `IDR` and exchange rate `1` can be marked as defaults rather than being presented as facts extracted from the document.
 
-### Batasan penting
+---
 
-- `output_schema` LangExtract adalah schema raw envelope `{"extractions": [...]}`, bukan schema bisnis Claim JSON. Ia tidak untuk final JSON.
-- `char_interval` adalah 0-based half-open span dalam input Markdown. Page number tidak selalu dapat dipertahankan jika Docling tidak menyisipkan page marker; char offsets tetap sumber primer.
-- Aturan/model ID dari provider dapat berubah. Python membuat canonical occurrence IDs dan tidak deduplikasi teks yang sama pada span berbeda.
-- LangExtract bukan ICD ontology/medical coding validator. Suggestion harus melalui terminology server dan human review.
-- Token usage dibaca dari blok `usage` provider bila ada; bila tidak, angka `estimated` (tiktoken) dipakai dan ditandai. Cost dihitung dari tarif per tahap dan merupakan estimasi, bukan tagihan yang telah diverifikasi.
-- Gangguan `EOF while parsing JSON` diminimalkan dengan output schema + item extraction + resolver suppress parse errors, tetapi bukan jaminan semua provider comply.
+## 🛡️ Design principles
 
-### Menambah field
+### 1. Grounded over generated
 
-Ikuti checklist di [`docs/langextract_claim_developer_guide.md`](docs/langextract_claim_developer_guide.md). Dokument tersebut menyebutkan file dan urutan perubahan untuk facts, relationship, normalisasi, derived fields, provenance, dan test.
+The document is the source of truth. Model output without valid source grounding is not promoted to business data.
 
-### Test offline
+### 2. Facts ≠ analysis
+
+```text
+claim_data
+    │
+    ├── explicit document facts
+    │
+    └── normalized facts
+
+analyst_analysis
+    │
+    └── derived / review-oriented output
+```
+
+### 3. Deterministic business logic
+
+Where possible, business fields are calculated or assembled by Python from already-grounded facts instead of asking the LLM to generate the final JSON.
+
+### 4. Fail loudly
+
+Extraction failures should be visible. The default configuration does not silently turn a failed extraction into apparently valid claim data.
+
+### 5. Auditable by design
+
+The application keeps the complete contract and provenance information so individual values can be traced back to the extracted source.
+
+---
+
+## 🧪 Testing
+
+Run the offline test suite:
 
 ```powershell
 python -m unittest discover tests -v
 ```
 
-`tests/test_usage_tracker.py` tidak melakukan network/API call: ia menguji normalisasi payload usage OpenAI/Gemini, agregasi ledger (termasuk konkurensi), pemisahan angka `reported` vs `estimated`, pembacaan usage VLM per halaman dari objek konversi Docling, dan proxy pencatat usage pada SDK client. `tests/test_langextract_service.py` tetap menguji kontrak claim.
+The tests cover areas including:
 
-Test tidak melakukan network/API call. Smoke test live memerlukan `config.properties` yang valid; provider OpenAI-compatible gateway harus mendukung JSON/schema mode yang dikonfigurasi.
+- claim form generation
+- claim extraction contract
+- formatting / normalization
+- usage tracking
+- provider usage payload handling
+- Docling VLM usage aggregation
+- extraction behavior
+
+Core tests do not require network/API access.
+
+For live smoke tests, provide a valid `config.properties` and the required provider credentials.
+
+---
+
+## 📚 Documentation
+
+| Document | Description |
+|---|---|
+| [`docs/langextract_claim_developer_guide.md`](docs/langextract_claim_developer_guide.md) | Developer guide for fields, relationships, normalization, provenance, tests, and documentation |
+| [`docs/claim_rulebook.md`](docs/claim_rulebook.md) | Claim business rules |
+| [`flow.md`](flow.md) | End-to-end processing flow |
+| [`prd.md`](prd.md) | Product requirements and project specification |
+
+---
+
+## ⚠️ Important limitations
+
+- LangExtract `output_schema` constrains the raw extraction envelope; it is **not** the final business Claim JSON schema.
+- `char_interval` uses a 0-based half-open span in the Markdown input.
+- Page numbers may not always be recoverable when the parser does not emit page markers; character offsets remain the primary provenance signal.
+- Provider behavior and model-generated group IDs can change. The Python layer therefore creates canonical occurrence IDs.
+- LangExtract is not an ICD ontology or medical coding validator. ICD suggestions require terminology validation and human review.
+- Token estimates are estimates, not provider billing statements.
+- JSON parse failures such as `EOF while parsing JSON` can be reduced through schema constraints and smaller extraction units, but provider compliance is not guaranteed.
+
+---
+
+## 🗺️ Roadmap
+
+- [ ] Stronger document/page classification
+- [ ] More robust provenance visualization
+- [ ] Better parser comparison metrics
+- [ ] Claim-level confidence scoring
+- [ ] Human review workflow
+- [ ] Terminology/ICD validation integration
+- [ ] Regression dataset and benchmark suite
+- [ ] Production deployment profile
+
+---
+
+## 🤝 Development workflow
+
+Before opening a change:
+
+```powershell
+# Run tests
+python -m unittest discover tests -v
+
+# Start the app locally
+python -m streamlit run app.py
+```
+
+When adding a claim field, update the field definition, extraction mapping, normalization/derived logic, schema, tests, and documentation together. See the developer guide for the detailed checklist.
+
+---
+
+## License
+
+This repository currently does not declare an open-source license. Treat the code as **all rights reserved / project-internal** unless a license is added to the repository.
+
+---
+
+<div align="center">
+
+**Claim Entry Python**
+
+Document → Grounded Facts → Validated Claim Data
+
+Built with Python, Docling, LangExtract, and Streamlit.
+
+</div>
