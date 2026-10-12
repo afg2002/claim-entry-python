@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import shutil
 import tempfile
 import zipfile
@@ -16,8 +17,19 @@ from config import AppConfig
 from comparison import compare_results, similarity_matrix
 from comparison.metrics import usage_stage_reports
 from parsers import parse_docling, parse_mineru
-from services.claim_form import refresh_grouped_decisions
-from services.usage_tracker import combine_usage_reports
+from services import extract_claim_from_markdown
+from services.claim_form import (
+    apply_document_claim_type,
+    build_claim_form,
+    build_full_claim_json,
+    refresh_grouped_decisions,
+)
+from services.multi_document import merge_document_markdown
+from services.page_classifier import classify_pages
+from services.usage_tracker import (
+    combine_usage_reports,
+    unavailable_usage_report,
+)
 from utils import (
     PARSER_FORMAT_SUPPORT,
     SUPPORTED_UPLOAD_TYPES,
@@ -48,6 +60,162 @@ USAGE_STAGE_LABELS = {
     "icd_suggestion": "ICD suggestion",
     "document_total": "Total dokumen",
 }
+
+
+def _run_parser(
+    parser_name: str,
+    input_path: Path,
+    output_dir: Path,
+    *,
+    information_extraction: bool,
+    analyze_all_pages: bool,
+    extraction_profile: str,
+    ocr_engine: str,
+    mineru_backend: str,
+) -> dict[str, Any]:
+    if parser_name == "Docling":
+        return parse_docling(
+            input_path,
+            output_dir,
+            information_extraction=information_extraction,
+            analyze_all_pages=analyze_all_pages,
+            extraction_profile=extraction_profile,
+            llm_config=LLM_CONFIG,
+            ocr_engine=ocr_engine,
+        )
+    if parser_name == "MinerU":
+        return parse_mineru(
+            input_path,
+            output_dir,
+            backend=mineru_backend,
+            information_extraction=information_extraction,
+            llm_config=LLM_CONFIG,
+        )
+    raise ValueError(f"Parser tidak dikenal: {parser_name}")
+
+
+def _build_combined_claim_result(
+    parser_name: str,
+    sources: list[dict[str, Any]],
+    job_dir: Path,
+) -> dict[str, Any]:
+    import time
+
+    started = time.perf_counter()
+    markdown, pages = merge_document_markdown([
+        {
+            "filename": source["filename"],
+            "markdown": source["result"].get("markdown", ""),
+            "pages": (source["result"].get("json_data") or {}).get(
+                "raw_ocr_pages", []
+            ),
+        }
+        for source in sources
+    ])
+    output_dir = job_dir / "combined_claim" / parser_name.lower()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_stem = f"{parser_name.lower()}_combined_claim"
+    extracted = extract_claim_from_markdown(
+        markdown=markdown,
+        config=LLM_CONFIG,
+        output_dir=output_dir,
+        output_stem=output_stem,
+    )
+    extraction = extracted["data"]
+    extraction["pages_analyzed"] = len(pages)
+    extraction["extraction_engine"] = "langextract"
+    extraction["source_stage"] = "multi_document_markdown"
+    extraction["source_files"] = [source["filename"] for source in sources]
+    extraction["document_conversion_engine"] = parser_name.lower()
+    classifications = classify_pages(pages, LLM_CONFIG) if pages else []
+    extraction = apply_document_claim_type(extraction, pages, classifications)
+    claim_form = build_claim_form(
+        extraction,
+        pages=pages,
+        classifications=classifications,
+    )
+
+    vlm_reports = [
+        (source["result"].get("usage") or {}).get("vlm_ocr")
+        for source in sources
+        if (source["result"].get("usage") or {}).get("vlm_ocr")
+    ]
+    usage_vlm = (
+        combine_usage_reports(vlm_reports, stage="vlm_ocr")
+        if vlm_reports
+        else unavailable_usage_report(
+            stage="vlm_ocr",
+            note=f"Parser {parser_name} tidak melaporkan usage OCR remote.",
+        )
+    )
+    usage_extraction = extracted.get("usage", {})
+    usage = {
+        "vlm_ocr": usage_vlm,
+        "extraction": usage_extraction,
+        "total": combine_usage_reports(
+            [usage_vlm, usage_extraction], stage="document_total"
+        ),
+    }
+    grouped_form = build_full_claim_json(
+        {**extraction, "usage": usage},
+        pages=pages,
+        classifications=classifications,
+    )
+    data = {
+        "claim_form": claim_form,
+        "grouped_claim_form": grouped_form,
+        "information_extraction": extraction,
+        "raw_ocr_pages": pages,
+        "source_files": [source["filename"] for source in sources],
+        "confidence_by_source": [
+            {
+                "source_file": source["filename"],
+                "confidence": source["result"].get("confidence"),
+            }
+            for source in sources
+        ],
+        "debug_prompts": {"extraction": extracted.get("debug_prompts", {})},
+        "usage": usage,
+    }
+    markdown_path = output_dir / f"{output_stem}.md"
+    json_path = output_dir / f"{output_stem}.json"
+    full_json_path = output_dir / f"{output_stem}.full.json"
+    markdown_path.write_text(markdown, encoding="utf-8")
+    json_path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
+    full_json_path.write_text(
+        json.dumps(extraction, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
+    elapsed = sum(
+        float((source["result"].get("performance") or {}).get("processing_seconds", 0))
+        for source in sources
+    ) + time.perf_counter() - started
+    return {
+        "parser": parser_name,
+        "display_name": f"{parser_name} · gabungan {len(sources)} file",
+        "source_file": ", ".join(source["filename"] for source in sources),
+        "source_files": [source["filename"] for source in sources],
+        "confidence_by_source": data["confidence_by_source"],
+        "status": "success",
+        "markdown": markdown,
+        "json_data": data,
+        "usage": usage,
+        "claim_form": claim_form,
+        "grouped_claim_form": grouped_form,
+        "artifacts": {
+            "markdown_path": str(markdown_path),
+            "json_path": str(json_path),
+            "full_json_path": str(full_json_path),
+            "output_directory": str(job_dir),
+        },
+        "performance": {"processing_seconds": round(elapsed, 3)},
+        "stdout": "",
+        "stderr": "",
+        "error": None,
+    }
 
 
 def _render_grouped_claim(grouped: dict[str, Any]) -> None:
@@ -257,6 +425,68 @@ def _render_claim_form(claim_form: dict[str, Any]) -> None:
         st.json(claim_form, expanded=False)
 
 
+def _render_confidence_report(
+    confidence: dict[str, Any] | None,
+    *,
+    source_file: str | None = None,
+) -> None:
+    """Show Docling document grades, component scores, and per-page scores."""
+    if source_file:
+        st.markdown(f"**{source_file}**")
+    if not confidence:
+        st.caption("Confidence score tidak tersedia dari parser ini.")
+        return
+
+    def score_label(value: Any) -> str:
+        try:
+            score = float(value)
+        except (TypeError, ValueError):
+            return "Tidak tersedia"
+        return f"{score * 100:.1f}%" if math.isfinite(score) else "Tidak tersedia"
+
+    summary = st.columns(4)
+    summary[0].metric("Mean grade", str(confidence.get("mean_grade") or "Tidak tersedia"))
+    summary[1].metric("Low grade", str(confidence.get("low_grade") or "Tidak tersedia"))
+    summary[2].metric("Mean score", score_label(confidence.get("mean_score")))
+    summary[3].metric("Low score", score_label(confidence.get("low_score")))
+    st.caption(
+        "Grade merangkum kualitas konversi; skor numerik adalah indikator "
+        "informational dan dapat berubah antarversi Docling."
+    )
+
+    component_rows = [
+        {
+            "Komponen": label,
+            "Score": score_label(confidence.get(key)),
+            "Grade": confidence.get(f"{key.removesuffix('_score')}_grade") or "Tidak tersedia",
+        }
+        for key, label in (
+            ("layout_score", "Layout"),
+            ("ocr_score", "OCR"),
+            ("parse_score", "Parse"),
+            ("table_score", "Table"),
+        )
+    ]
+    st.dataframe(pd.DataFrame(component_rows), use_container_width=True, hide_index=True)
+
+    page_scores = confidence.get("pages") or {}
+    if isinstance(page_scores, dict) and page_scores:
+        page_rows = []
+        for page_number, page_score in page_scores.items():
+            if not isinstance(page_score, dict):
+                continue
+            page_rows.append({
+                "Halaman": page_number,
+                "Layout": score_label(page_score.get("layout_score")),
+                "OCR": score_label(page_score.get("ocr_score")),
+                "Parse": score_label(page_score.get("parse_score")),
+                "Table": score_label(page_score.get("table_score")),
+            })
+        if page_rows:
+            st.markdown("**Confidence per halaman**")
+            st.dataframe(pd.DataFrame(page_rows), use_container_width=True, hide_index=True)
+
+
 def _usage_cost(usage: dict[str, Any], cost: Any = None) -> dict[str, float]:
     """Resolve a cost dict from either the usage report or a legacy value."""
     if isinstance(cost, dict) and cost:
@@ -341,6 +571,8 @@ if "job_dir" not in st.session_state:
 if "original_filename" not in st.session_state:
     st.session_state.original_filename = None
 
+if "combined_markdowns" not in st.session_state:
+    st.session_state.combined_markdowns = []
 
 # -----------------------------------------------------------------------------
 # Sidebar configuration
@@ -456,18 +688,59 @@ with st.sidebar:
 # -----------------------------------------------------------------------------
 # Upload
 # -----------------------------------------------------------------------------
-uploaded = st.file_uploader(
+uploaded_files = st.file_uploader(
     "Upload dokumen",
     type=SUPPORTED_UPLOAD_TYPES,
-    accept_multiple_files=False,
+    accept_multiple_files=True,
     help=(
-        "PDF dapat dibandingkan dengan Docling dan MinerU. Office dan "
-        "gambar mengikuti dukungan format masing-masing parser."
+        "Pilih satu atau beberapa dokumen. Format yang didukung bergantung "
+        "pada parser yang dipilih."
     ),
 )
 
 
-if uploaded is not None:
+uploaded_files = list(uploaded_files or [])
+if uploaded_files:
+    mode_labels = {
+        "separate": "Pisah per file",
+        "markdown": "Gabung Markdown saja",
+        "claim": "Gabung sebagai satu claim",
+    }
+    processing_mode = "separate"
+    if len(uploaded_files) > 1:
+        selected_mode_label = st.radio(
+            "Cara memproses file",
+            options=list(mode_labels.values()),
+            horizontal=True,
+            help=(
+                "Mode gabung hanya menawarkan parser yang mendukung semua "
+                "file terpilih."
+            ),
+        )
+        processing_mode = next(
+            mode for mode, label in mode_labels.items()
+            if label == selected_mode_label
+        )
+
+    file_rows = []
+    compatibility_by_index: dict[int, set[str]] = {}
+    for file_index, current_file in enumerate(uploaded_files):
+        compatible = set(get_compatible_parsers(current_file.name))
+        compatibility_by_index[file_index] = compatible
+        file_rows.append({
+            "File": current_file.name,
+            "Format": get_file_extension(current_file.name).upper(),
+            "Ukuran": f"{len(current_file.getvalue()):,} byte",
+            "Parser kompatibel": ", ".join(
+                parser_name for parser_name in selected_parsers
+                if parser_name in compatible
+            ) or "Tidak ada",
+        })
+
+    if len(uploaded_files) > 1:
+        st.dataframe(pd.DataFrame(file_rows), use_container_width=True, hide_index=True)
+
+    uploaded = uploaded_files[0]
     file_bytes = uploaded.getvalue()
     extension = get_file_extension(uploaded.name)
     pdf_inspector_result = None
@@ -486,18 +759,25 @@ if uploaded is not None:
         )
     compatible_parsers = get_compatible_parsers(uploaded.name)
     incompatible_parsers = get_incompatible_parsers(uploaded.name)
-
-    effective_parsers = [
+    common_parsers = [
         parser_name
         for parser_name in selected_parsers
-        if parser_name in compatible_parsers
+        if all(
+            parser_name in compatibility_by_index[index]
+            for index in range(len(uploaded_files))
+        )
     ]
-
-    unsupported_selected = [
-        parser_name
-        for parser_name in selected_parsers
-        if parser_name not in compatible_parsers
-    ]
+    effective_parsers = (
+        common_parsers
+        if processing_mode in {"markdown", "claim"}
+        else [
+            parser_name for parser_name in selected_parsers
+            if any(
+                parser_name in compatibility_by_index[index]
+                for index in range(len(uploaded_files))
+            )
+        ]
+    )
 
     preview_col, info_col = st.columns([2, 1])
     page_count: int | None = None
@@ -558,7 +838,11 @@ if uploaded is not None:
                     f"{pdf_inspector_result['error']}"
                 )
         st.subheader("Informasi dokumen")
-        st.write(f"**Nama:** {uploaded.name}")
+        st.write(
+            f"**Dipilih:** {len(uploaded_files)} file"
+            if len(uploaded_files) > 1
+            else f"**Nama:** {uploaded.name}"
+        )
         st.write(f"**Format:** `{extension.upper()}`")
         st.write(f"**Ukuran:** {len(file_bytes):,} byte")
 
@@ -572,11 +856,21 @@ if uploaded is not None:
         for parser_name in incompatible_parsers:
             st.write(f"⛔ {parser_name}")
 
-    if unsupported_selected:
+    unsupported_pairs = [
+        f"{current_file.name} ({parser_name})"
+        for index, current_file in enumerate(uploaded_files)
+        for parser_name in selected_parsers
+        if parser_name not in compatibility_by_index[index]
+    ]
+    if unsupported_pairs and processing_mode == "separate":
         st.warning(
-            "Parser berikut tidak mendukung format "
-            f"`{extension.upper()}` dan akan dilewati: "
-            + ", ".join(unsupported_selected)
+            "Kombinasi file/parser yang tidak didukung akan ditandai gagal: "
+            + ", ".join(unsupported_pairs)
+        )
+    elif unsupported_pairs:
+        st.warning(
+            "Mode gabung hanya menggunakan parser yang mendukung semua file. "
+            "Parser yang tidak kompatibel: " + ", ".join(unsupported_pairs)
         )
 
     if not selected_parsers:
@@ -584,7 +878,7 @@ if uploaded is not None:
 
     if selected_parsers and not effective_parsers:
         st.error(
-            "Tidak ada parser terpilih yang mendukung format dokumen ini."
+            "Tidak ada parser terpilih yang mendukung semua file untuk mode ini."
         )
 
     run_disabled = not selected_parsers or not effective_parsers
@@ -594,31 +888,31 @@ if uploaded is not None:
         type="primary",
         disabled=run_disabled,
     ):
-        original_suffix = Path(uploaded.name).suffix.lower()
-
-        if not original_suffix:
+        invalid_names = [
+            current_file.name
+            for current_file in uploaded_files
+            if not Path(current_file.name).suffix
+        ]
+        if invalid_names:
             st.error(
-                "File tidak memiliki ekstensi sehingga formatnya tidak "
-                "dapat diidentifikasi."
+                "File berikut tidak memiliki ekstensi: " + ", ".join(invalid_names)
             )
             st.stop()
 
         job_dir = Path(tempfile.mkdtemp(prefix="pc_"))
-
-        try:
-            internal_filename = create_safe_internal_filename(uploaded.name)
-        except ValueError as exc:
-            shutil.rmtree(job_dir, ignore_errors=True)
-            st.error(str(exc))
-            st.stop()
-
-        input_path = job_dir / internal_filename
-        input_path.write_bytes(file_bytes)
-
-        st.caption(
-            "Nama internal aman untuk Windows: "
-            f"`{input_path.name}`"
-        )
+        sources: list[dict[str, Any]] = []
+        for file_index, current_file in enumerate(uploaded_files):
+            source_dir = job_dir / "inputs" / f"{file_index + 1:03d}"
+            source_dir.mkdir(parents=True, exist_ok=True)
+            internal_filename = create_safe_internal_filename(current_file.name)
+            input_path = source_dir / internal_filename
+            input_path.write_bytes(current_file.getvalue())
+            sources.append({
+                "filename": current_file.name,
+                "input_path": input_path,
+                "compatible": compatibility_by_index[file_index],
+                "index": file_index,
+            })
 
         progress_bar = st.progress(
             0.0,
@@ -629,71 +923,181 @@ if uploaded is not None:
             expanded=True,
         )
         results: list[dict[str, Any]] = []
-        parser_count = len(effective_parsers)
-        current_parser_index = 0
+        combined_markdowns: list[dict[str, Any]] = []
 
-        for current_parser_index, parser_name in enumerate(
-            effective_parsers
-        ):
-            status_box.update(
-                label=f"Menjalankan {parser_name}...",
-                state="running",
-                expanded=True,
+        def run_source(
+            source: dict[str, Any],
+            parser_name: str,
+            *,
+            information_extraction: bool,
+        ) -> dict[str, Any]:
+            output_dir = (
+                job_dir
+                / "outputs"
+                / f"{source['index'] + 1:03d}_{parser_name.lower()}"
             )
+            result = _run_parser(
+                parser_name,
+                source["input_path"],
+                output_dir,
+                information_extraction=information_extraction,
+                analyze_all_pages=analyze_all_pages,
+                extraction_profile=extraction_profile,
+                ocr_engine=ocr_engine,
+                mineru_backend=mineru_backend,
+            )
+            result["source_file"] = source["filename"]
+            result["display_name"] = (
+                f"{parser_name} · {source['filename']} (file {source['index'] + 1})"
+            )
+            return result
+
+        def record_progress(label: str, result: dict[str, Any], completed: int, total: int) -> None:
             progress_bar.progress(
-                current_parser_index / parser_count,
-                text=f"Menjalankan {parser_name}...",
+                min(1.0, completed / max(total, 1)),
+                text=label,
             )
-
-            if parser_name == "Docling":
-                result = parse_docling(
-                    input_path,
-                    job_dir / "dc",
-                    information_extraction=docling_information_extraction,
-                    analyze_all_pages=analyze_all_pages,
-                    extraction_profile=extraction_profile,
-                    llm_config=LLM_CONFIG,
-                    ocr_engine=ocr_engine,
-                )
-
-            elif parser_name == "MinerU":
-                result = parse_mineru(
-                    input_path,
-                    job_dir / "mineru",
-                    backend=mineru_backend,
-                    information_extraction=docling_information_extraction,
-                    llm_config=LLM_CONFIG,
-                )
-            else:
-                continue
-
-            results.append(result)
-
-            completed_progress = (
-                current_parser_index + 1
-            ) / parser_count
-            progress_bar.progress(
-                completed_progress,
-                text=(
-                    f"{parser_name} selesai"
-                    if result.get("status") == "success"
-                    else f"{parser_name} gagal"
-                ),
-            )
-
             if result.get("status") == "success":
-                seconds = result.get(
-                    "performance",
-                    {},
-                ).get("processing_seconds", 0)
-                status_box.write(
-                    f"✅ {parser_name} selesai dalam "
-                    f"{float(seconds):.1f} detik."
-                )
+                seconds = (result.get("performance") or {}).get("processing_seconds", 0)
+                status_box.write(f"✅ {label} ({float(seconds):.1f} detik)")
             else:
                 status_box.write(
-                    f"❌ {parser_name}: "
-                    f"{result.get('error', 'Unknown error')}"
+                    f"❌ {label}: {result.get('error', 'Unknown error')}"
+                )
+
+        if processing_mode == "separate":
+            task_count = len(sources) * len(selected_parsers)
+            completed = 0
+            for source in sources:
+                for parser_name in selected_parsers:
+                    label = f"{parser_name} · {source['filename']}"
+                    status_box.update(label=f"Menjalankan {label}...", state="running")
+                    if parser_name not in source["compatible"]:
+                        result = {
+                            "parser": parser_name,
+                            "display_name": label,
+                            "source_file": source["filename"],
+                            "status": "error",
+                            "markdown": "",
+                            "json_data": {},
+                            "artifacts": {},
+                            "performance": {"processing_seconds": 0},
+                            "error": "Format file tidak didukung parser ini.",
+                        }
+                    else:
+                        result = run_source(
+                            source,
+                            parser_name,
+                            information_extraction=docling_information_extraction,
+                        )
+                    results.append(result)
+                    completed += 1
+                    record_progress(label, result, completed, task_count)
+
+        elif processing_mode == "markdown":
+            task_count = len(sources) * len(common_parsers)
+            completed = 0
+            for parser_name in common_parsers:
+                parser_sources: list[dict[str, Any]] = []
+                failed_sources: list[str] = []
+                for source in sources:
+                    label = f"{parser_name} · {source['filename']}"
+                    status_box.update(label=f"Menjalankan {label}...", state="running")
+                    result = run_source(
+                        source,
+                        parser_name,
+                        information_extraction=docling_information_extraction,
+                    )
+                    results.append(result)
+                    if result.get("status") == "success":
+                        parser_sources.append({
+                            "filename": source["filename"],
+                            "markdown": result.get("markdown", ""),
+                            "pages": (result.get("json_data") or {}).get(
+                                "raw_ocr_pages", []
+                            ),
+                        })
+                    else:
+                        failed_sources.append(source["filename"])
+                    completed += 1
+                    record_progress(label, result, completed, task_count)
+
+                if parser_sources:
+                    merged_markdown, _ = merge_document_markdown(parser_sources)
+                    combined_dir = job_dir / "combined_markdown"
+                    combined_dir.mkdir(parents=True, exist_ok=True)
+                    combined_path = combined_dir / f"{parser_name.lower()}_combined.md"
+                    combined_path.write_text(merged_markdown, encoding="utf-8")
+                    combined_markdowns.append({
+                        "parser": parser_name,
+                        "markdown": merged_markdown,
+                        "path": str(combined_path),
+                        "source_files": [item["filename"] for item in parser_sources],
+                        "failed_sources": failed_sources,
+                    })
+
+        else:
+            task_count = len(sources) * len(common_parsers) + len(common_parsers)
+            completed = 0
+            for parser_name in common_parsers:
+                parser_sources = []
+                failed_sources = []
+                for source in sources:
+                    label = f"OCR {parser_name} · {source['filename']}"
+                    status_box.update(label=f"Menjalankan {label}...", state="running")
+                    result = run_source(
+                        source,
+                        parser_name,
+                        information_extraction=False,
+                    )
+                    if result.get("status") == "success":
+                        parser_sources.append({
+                            "filename": source["filename"],
+                            "result": result,
+                        })
+                    else:
+                        failed_sources.append(
+                            f"{source['filename']}: {result.get('error', 'Gagal diproses')}"
+                        )
+                    completed += 1
+                    record_progress(label, result, completed, task_count)
+
+                if failed_sources:
+                    result = {
+                        "parser": parser_name,
+                        "display_name": f"{parser_name} · claim gabungan gagal",
+                        "source_files": [source["filename"] for source in sources],
+                        "status": "error",
+                        "markdown": "",
+                        "json_data": {"source_errors": failed_sources},
+                        "artifacts": {"output_directory": str(job_dir)},
+                        "performance": {"processing_seconds": 0},
+                        "error": "Claim gabungan dibatalkan karena ada sumber gagal: "
+                        + "; ".join(failed_sources),
+                    }
+                else:
+                    try:
+                        result = _build_combined_claim_result(
+                            parser_name,
+                            parser_sources,
+                            job_dir,
+                        )
+                    except Exception as exc:
+                        result = {
+                            "parser": parser_name,
+                            "display_name": f"{parser_name} · claim gabungan gagal",
+                            "source_files": [source["filename"] for source in sources],
+                            "status": "error",
+                            "markdown": "",
+                            "json_data": {},
+                            "artifacts": {"output_directory": str(job_dir)},
+                            "performance": {"processing_seconds": 0},
+                            "error": f"{type(exc).__name__}: {exc}",
+                        }
+                results.append(result)
+                completed += 1
+                record_progress(
+                    f"Analisis gabungan {parser_name}", result, completed, task_count
                 )
 
         success_count = sum(
@@ -729,7 +1133,12 @@ if uploaded is not None:
 
         st.session_state.results = results
         st.session_state.job_dir = str(job_dir)
-        st.session_state.original_filename = uploaded.name
+        st.session_state.original_filename = (
+            uploaded_files[0].name
+            if len(uploaded_files) == 1
+            else f"{len(uploaded_files)} file"
+        )
+        st.session_state.combined_markdowns = combined_markdowns
 
 
 # -----------------------------------------------------------------------------
@@ -796,13 +1205,21 @@ if results:
         f"{output_bytes:,} byte",
     )
 
-    docling_result = next(
-        (
-            result for result in successful_results
-            if result.get("parser") == "Docling"
-        ),
-        None,
-    ) or (successful_results[0] if successful_results else None)
+    detail_candidates = [
+        result for result in successful_results
+        if result.get("parser") == "Docling"
+    ] or successful_results
+    docling_result = None
+    if detail_candidates:
+        selected_detail_index = st.selectbox(
+            "Hasil dokumen untuk detail",
+            options=range(len(detail_candidates)),
+            format_func=lambda index: detail_candidates[index].get(
+                "display_name", detail_candidates[index].get("parser", "Unknown")
+            ),
+            key="selected_result_detail",
+        )
+        docling_result = detail_candidates[selected_detail_index]
     extraction = (
         docling_result.get("json_data", {}).get("information_extraction")
         if docling_result
@@ -927,21 +1344,56 @@ if results:
     )
 
     with raw_ocr_tab:
+        confidence_by_source = (
+            docling_result.get("confidence_by_source") or []
+            if docling_result
+            else []
+        )
+        if confidence_by_source:
+            st.markdown("**Docling confidence scores**")
+            for source_confidence in confidence_by_source:
+                with st.expander(
+                    str(source_confidence.get("source_file") or "Dokumen"),
+                    expanded=False,
+                ):
+                    _render_confidence_report(
+                        source_confidence.get("confidence"),
+                        source_file=source_confidence.get("source_file"),
+                    )
+        elif docling_result:
+            confidence_report = docling_result.get("confidence") or (
+                docling_result.get("json_data", {}).get("docling_document", {}).get(
+                    "confidence"
+                )
+            )
+            if confidence_report:
+                st.markdown("**Docling confidence scores**")
+                _render_confidence_report(
+                    confidence_report,
+                    source_file=docling_result.get("source_file"),
+                )
+            else:
+                st.caption("Confidence scores tidak tersedia untuk parser/versi ini.")
+
         raw_ocr_pages = (
             docling_result.get("json_data", {}).get("raw_ocr_pages", [])
             if docling_result
             else []
         )
         if raw_ocr_pages:
-            for page in raw_ocr_pages:
+            for page_index, page in enumerate(raw_ocr_pages):
                 page_number = page.get("page_number", "?")
-                with st.expander(f"Halaman {page_number}", expanded=False):
+                source_file = page.get("source_file")
+                page_title = f"Halaman {page_number}"
+                if source_file:
+                    page_title += f" · {source_file}"
+                with st.expander(page_title, expanded=False):
                     st.text_area(
                         f"Raw OCR halaman {page_number}",
                         value=page.get("raw_text") or "(tidak ada raw text)",
                         height=300,
                         label_visibility="collapsed",
-                        key=f"raw_ocr_{page_number}",
+                        key=f"raw_ocr_{page_index}_{page_number}",
                     )
                     if page.get("errors"):
                         st.warning("; ".join(map(str, page["errors"])))
@@ -949,34 +1401,38 @@ if results:
             st.info("Raw OCR native tersedia setelah Information Extraction dijalankan.")
 
     with markdown_tab:
-        markdown_columns = st.columns(len(results))
-
-        for column, result in zip(
-            markdown_columns,
-            results,
-        ):
-            with column:
-                parser_name = result.get(
-                    "parser",
-                    "Unknown",
-                )
-                st.markdown(f"### {parser_name}")
-
+        for result_index, result in enumerate(results):
+            display_name = result.get(
+                "display_name", result.get("parser", "Unknown")
+            )
+            with st.expander(display_name, expanded=False):
                 if result.get("status") == "success":
                     st.text_area(
-                        f"Markdown {parser_name}",
+                        f"Markdown {display_name}",
                         value=result.get("markdown", ""),
-                        height=600,
+                        height=500,
                         label_visibility="collapsed",
-                        key=f"view_{parser_name}",
+                        key=f"view_{result_index}",
                     )
                 else:
-                    st.error(
-                        result.get(
-                            "error",
-                            "Unknown error",
-                        )
-                    )
+                    st.error(result.get("error", "Unknown error"))
+
+        for combined_index, combined in enumerate(
+            st.session_state.combined_markdowns
+        ):
+            st.markdown(f"### {combined['parser']} · Markdown gabungan")
+            if combined.get("failed_sources"):
+                st.warning(
+                    "Markdown tidak lengkap. File gagal: "
+                    + ", ".join(combined["failed_sources"])
+                )
+            st.text_area(
+                f"Markdown gabungan {combined['parser']}",
+                value=combined["markdown"],
+                height=500,
+                label_visibility="collapsed",
+                key=f"combined_markdown_view_{combined_index}",
+            )
 
     with json_tab:
         if docling_result and docling_result.get("status") == "success":
@@ -984,7 +1440,11 @@ if results:
                 docling_result.get("json_data", {}).get("grouped_claim_form")
             )
             if grouped:
-                if extraction:
+                claim_decision = (grouped.get("decisions") or {}).get("claimType") or {}
+                inventory_claim_decision = (
+                    claim_decision.get("method") == "claim_document_inventory"
+                )
+                if extraction and not inventory_claim_decision:
                     grouped = refresh_grouped_decisions(extraction, grouped)
                 _render_grouped_claim(grouped)
                 st.divider()
@@ -1007,20 +1467,16 @@ if results:
             st.info("Structured extraction belum tersedia.")
 
         st.divider()
-        selected_result_name = st.selectbox(
-            "Pilih parser",
-            options=[
-                result.get("parser", "Unknown")
-                for result in results
-            ],
+        selected_result_index = st.selectbox(
+            "Pilih hasil",
+            options=range(len(results)),
+            format_func=lambda index: results[index].get(
+                "display_name", results[index].get("parser", "Unknown")
+            ),
+            key="selected_json_result",
         )
 
-        selected_result = next(
-            result
-            for result in results
-            if result.get("parser", "Unknown")
-            == selected_result_name
-        )
+        selected_result = results[selected_result_index]
 
         if selected_result.get("status") == "success":
             st.json(
@@ -1044,7 +1500,9 @@ if results:
         usage_rows: list[dict[str, Any]] = []
         document_totals: list[dict[str, Any]] = []
         for result in results:
-            parser_name = result.get("parser", "Unknown")
+            parser_name = result.get(
+                "display_name", result.get("parser", "Unknown")
+            )
             stage_reports = usage_stage_reports(result)
             for report in stage_reports:
                 report_cost = _usage_cost(report)
@@ -1129,14 +1587,23 @@ if results:
             "Kemiripan hanya membandingkan teks Markdown dan bukan "
             "ukuran akurasi absolut."
         )
-        st.dataframe(
-            similarity_matrix(results),
-            use_container_width=True,
-        )
+        similarity_groups: dict[str, list[dict[str, Any]]] = {}
+        for result in results:
+            group_name = str(result.get("source_file") or "Hasil gabungan")
+            similarity_groups.setdefault(group_name, []).append(result)
+        for group_name, group_results in similarity_groups.items():
+            if len(similarity_groups) > 1:
+                st.markdown(f"**{group_name}**")
+            st.dataframe(
+                similarity_matrix(group_results),
+                use_container_width=True,
+            )
 
     with log_tab:
         for result in results:
-            parser_name = result.get("parser", "Unknown")
+            parser_name = result.get(
+                "display_name", result.get("parser", "Unknown")
+            )
             parser_status = result.get("status", "unknown")
 
             with st.expander(
@@ -1222,20 +1689,38 @@ if results:
                 st.warning(f"Rulebook tidak dapat dimuat: {exc}")
 
     with download_tab:
+        for combined_index, combined in enumerate(
+            st.session_state.combined_markdowns
+        ):
+            st.markdown(f"#### {combined['parser']} · Markdown gabungan")
+            if combined.get("failed_sources"):
+                st.warning(
+                    "Tidak semua file berhasil digabung: "
+                    + ", ".join(combined["failed_sources"])
+                )
+            st.download_button(
+                f"Download Markdown gabungan {combined['parser']}",
+                data=combined["markdown"],
+                file_name=f"{combined['parser'].lower()}_combined.md",
+                mime="text/markdown",
+                key=f"download_combined_md_{combined_index}",
+            )
+
         for download_index, result in enumerate(results):
             parser_name = result.get("parser", "Unknown")
+            display_name = result.get("display_name", parser_name)
             safe_parser_name = "".join(
                 character.lower()
                 if character.isalnum()
                 else "_"
-                for character in parser_name
+                for character in display_name
             ).strip("_")
 
-            st.markdown(f"#### {parser_name}")
+            st.markdown(f"#### {display_name}")
             download_columns = st.columns(2)
 
             download_columns[0].download_button(
-                f"Download Markdown {parser_name}",
+                f"Download Markdown {display_name}",
                 data=result.get("markdown", ""),
                 file_name=f"{safe_parser_name}_output.md",
                 mime="text/markdown",
@@ -1244,7 +1729,7 @@ if results:
             )
 
             download_columns[1].download_button(
-                f"Download JSON {parser_name}",
+                f"Download JSON {display_name}",
                 data=json.dumps(
                     result.get("json_data", {}),
                     ensure_ascii=False,
@@ -1346,4 +1831,5 @@ if results:
         st.session_state.results = []
         st.session_state.job_dir = None
         st.session_state.original_filename = None
+        st.session_state.combined_markdowns = []
         st.rerun()

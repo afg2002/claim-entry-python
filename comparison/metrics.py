@@ -42,7 +42,7 @@ def calculate_metrics(result:dict[str,Any])->dict[str,Any]:
     table_lines=len(re.findall(r"(?m)^\s*\|(?:.*\|)+\s*$",md))//2
     total=combine_usage_reports(usage_stage_reports(result),stage="total")
     vlm=(result_usage(result).get("vlm_ocr") or {})
-    return {"Parser":result.get("parser","Unknown"),"Status":result.get("status","unknown"),
+    return {"Parser":result.get("display_name",result.get("parser","Unknown")),"Status":result.get("status","unknown"),
     "Time (s)":result.get("performance",{}).get("processing_seconds",0),"Characters":len(md),
     "Words":len(re.findall(r"\b\w+\b",md,flags=re.UNICODE)),"Headings":len(re.findall(r"(?m)^#{1,6}\s+",md)),
     "Tables (estimated)":max(table_lines,_labels(data,{"table"})),"Images (estimated)":_labels(data,{"image","picture","figure"}),

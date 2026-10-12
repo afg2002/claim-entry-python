@@ -345,6 +345,35 @@ class DocumentInventoryTests(unittest.TestCase):
         self.assertEqual(document["pages"][0]["category"], "formulir_klaim")
         self.assertEqual(document["pages"][1]["document_type"], "Kwitansi Rawat Jalan")
         self.assertEqual(document["pages"][1]["source"], "model")
+        self.assertEqual(
+            form["document_list"],
+            [
+                "Formulir Pengajuan Klaim - page 1",
+                "Kwitansi Rawat Jalan - page 2",
+            ],
+        )
+
+    def test_combined_page_inventory_keeps_its_source_filename(self):
+        pages = [{
+            "page_number": 4,
+            "raw_text": "Invoice",
+            "source_file": "receipt.pdf",
+        }]
+        classifications = [{
+            "page": "4",
+            "document_type": "Invoice",
+            "category": "invoice",
+            "source": "model",
+        }]
+        form = build_claim_form(
+            _contract(CLAIM_ITEMS),
+            pages=pages,
+            classifications=classifications,
+        )
+
+        self.assertEqual(
+            form["document"]["pages"][0]["source_file"], "receipt.pdf"
+        )
 
     def test_document_type_is_never_rewritten_into_a_catch_all(self):
         form = build_claim_form(
@@ -568,20 +597,69 @@ class ClaimCaseTypeTests(unittest.TestCase):
             canonical_claim_case_type("Kelengkapan Dokumen")[0], "completeness"
         )
 
-    def test_document_inventory_derives_new_for_skd_or_claim_form(self):
-        for document_type in ("SKD", "Formulir Pengajuan Klaim"):
-            with self.subTest(document_type=document_type):
+    def test_document_type_with_claim_form_phrase_derives_new(self):
+        pages = [{"page_number": 1, "raw_text": "Formulir Pengajuan Klaim"}]
+        classifications = [{
+            "page": "1",
+            "document_type": "Formulir Pengajuan Klaim",
+            "category": None,
+            "source": "model",
+        }]
+        form = build_claim_form(
+            _contract([]), pages=pages, classifications=classifications
+        )
+        self.assertEqual(form["claim"]["claim_case_type"], "new")
+
+    def test_skd_or_category_without_claim_form_phrase_is_completeness(self):
+        for document_type, category in (
+            ("SKD", "formulir_klaim"),
+            ("Invoice", "formulir_klaim"),
+        ):
+            with self.subTest(document_type=document_type, category=category):
                 pages = [{"page_number": 1, "raw_text": document_type}]
                 classifications = [{
                     "page": "1",
                     "document_type": document_type,
-                    "category": None,
+                    "category": category,
                     "source": "model",
                 }]
                 form = build_claim_form(
                     _contract([]), pages=pages, classifications=classifications
                 )
-                self.assertEqual(form["claim"]["claim_case_type"], "new")
+                self.assertEqual(form["claim"]["claim_case_type"], "completeness")
+
+    def test_complete_inventory_without_claim_form_overrides_extracted_new(self):
+        items = [_item("claim_type", "SKD", group="c1")]
+        pages = [{"page_number": 1, "raw_text": "Invoice"}]
+        classifications = [{
+            "page": "1",
+            "document_type": "Invoice",
+            "source": "model",
+        }]
+        form = build_claim_form(
+            _contract(items), pages=pages, classifications=classifications
+        )
+        self.assertEqual(form["claim"]["claim_case_type"], "completeness")
+
+    def test_incomplete_inventory_does_not_preserve_extracted_new(self):
+        items = [_item("claim_type", "SKD", group="c1")]
+        pages = [
+            {"page_number": 1, "raw_text": "Invoice"},
+            {"page_number": 2, "raw_text": ""},
+        ]
+        classifications = [{
+            "page": "1",
+            "document_type": "Invoice",
+            "source": "model",
+        }, {
+            "page": "2",
+            "document_type": None,
+            "source": "not_named",
+        }]
+        form = build_claim_form(
+            _contract(items), pages=pages, classifications=classifications
+        )
+        self.assertEqual(form["claim"]["claim_case_type"], "unknown")
 
     def test_complete_named_inventory_without_claim_form_is_completeness(self):
         pages = [
@@ -684,6 +762,32 @@ class DescriptionWiringTests(unittest.TestCase):
 
 
 class GroupedSlimTests(unittest.TestCase):
+    def test_grouped_output_keeps_document_pages_and_joined_document_list(self):
+        grouped = build_grouped_claim_form(
+            _contract(CLAIM_ITEMS),
+            pages=PAGES_FORM,
+            classifications=CLASSIFICATIONS_FORM,
+        )
+
+        self.assertEqual(grouped["document"]["total_pages"], 2)
+        self.assertEqual(
+            [
+                (item["document_type"], item["page"])
+                for item in grouped["document"]["pages"]
+            ],
+            [
+                ("Formulir Pengajuan Klaim", 1),
+                ("Kwitansi Rawat Jalan", 2),
+            ],
+        )
+        self.assertEqual(
+            grouped["document_list"],
+            [
+                "Formulir Pengajuan Klaim - page 1",
+                "Kwitansi Rawat Jalan - page 2",
+            ],
+        )
+
     def test_document_titles_do_not_conflict_with_claim_type_category(self):
         claim_type_items = [
             _item(

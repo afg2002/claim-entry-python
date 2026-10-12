@@ -54,6 +54,27 @@ def _vlm_usage(
     )
 
 
+def _serialize_confidence_report(confidence: Any) -> dict[str, Any] | None:
+    """Serialize Docling's confidence report, including null for unavailable scores."""
+    if confidence is None:
+        return None
+    if hasattr(confidence, "model_dump_json"):
+        return json.loads(confidence.model_dump_json())
+    if isinstance(confidence, dict):
+        return json.loads(json.dumps(confidence, ensure_ascii=False, default=str))
+    return None
+
+
+def _attach_confidence_report(
+    raw_data: dict[str, Any],
+    confidence_report: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Keep Docling's report alongside the exported raw document payload."""
+    if confidence_report is None:
+        return raw_data
+    return {**raw_data, "confidence": confidence_report}
+
+
 def _resolve_extraction_profile(extraction_profile: str | None, markdown: str | None = None) -> str:
     """Project policy: insurance claim documents must always use ClaimAnalysis."""
     requested = (extraction_profile or "").strip()
@@ -181,6 +202,10 @@ def _convert_document(source: Path, config: AppConfig, ocr_engine: str):
     )
     from docling.document_converter import DocumentConverter, PdfFormatOption
 
+    is_image = source.suffix.lower() in {
+        ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"
+    }
+
     if ocr_engine == "Remote VLM":
         from docling.datamodel.vlm_engine_options import (
             ApiVlmEngineOptions,
@@ -216,6 +241,10 @@ def _convert_document(source: Path, config: AppConfig, ocr_engine: str):
                 pipeline_cls=VlmPipeline,
             ),
         }
+        if is_image:
+            format_options[InputFormat.IMAGE] = _vlm_image_format_option(
+                pipeline_options
+            )
     else:
         pipeline_options = PdfPipelineOptions(do_ocr=ocr_engine != "Docling default")
         if ocr_engine == "RapidOCR":
@@ -227,18 +256,28 @@ def _convert_document(source: Path, config: AppConfig, ocr_engine: str):
                 pipeline_options=pipeline_options,
             ),
         }
+        if is_image:
+            from docling.document_converter import ImageFormatOption
 
-    if source.suffix.lower() in {
-        ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"
-    }:
-        from docling.document_converter import ImageFormatOption
-
-        format_options[InputFormat.IMAGE] = ImageFormatOption(
-            pipeline_options=pipeline_options,
-        )
+            format_options[InputFormat.IMAGE] = ImageFormatOption(
+                pipeline_options=pipeline_options,
+            )
 
     converter = DocumentConverter(format_options=format_options)
     return converter.convert(str(source))
+
+
+def _vlm_image_format_option(pipeline_options: Any) -> Any:
+    """Match Docling CLI's direct IMAGE→VlmPipeline backend mapping."""
+    from docling.backend.image_backend import ImageDocumentBackend
+    from docling.document_converter import PdfFormatOption
+    from docling.pipeline.vlm_pipeline import VlmPipeline
+
+    return PdfFormatOption(
+        pipeline_cls=VlmPipeline,
+        pipeline_options=pipeline_options,
+        backend=ImageDocumentBackend,
+    )
 
 
 def parse_docling(
@@ -318,6 +357,11 @@ def parse_docling(
             raw_data = document.model_dump(mode="json")
         else:
             raw_data = {"note": "Structured JSON unavailable in this Docling version."}
+        confidence_report = _serialize_confidence_report(
+            getattr(converted, "confidence", None)
+        )
+        if isinstance(raw_data, dict):
+            raw_data = _attach_confidence_report(raw_data, confidence_report)
 
         # A Remote-VLM run that produced nothing fell back to the plain Docling
         # pipeline, so the VLM stage never billed this document.
@@ -400,7 +444,7 @@ def parse_docling(
         # is kept alongside it so nothing is lost for review or regression.
         claim_form = None
         page_classifications: list[dict[str, Any]] = []
-        if raw_ocr_pages:
+        if raw_ocr_pages and information_extraction:
             page_classifications = classify_pages(raw_ocr_pages, config)
         if isinstance(extraction, dict) and extraction.get("claim_data"):
             extraction = apply_document_claim_type(
@@ -425,6 +469,7 @@ def parse_docling(
             "grouped_claim_form": grouped_form,
             "information_extraction": extraction,
             "docling_document": raw_data,
+            "confidence": confidence_report,
             "raw_ocr_pages": raw_ocr_pages,
             "debug_prompts": debug_prompts,
             "usage": usage_tree,
@@ -450,6 +495,7 @@ def parse_docling(
             "usage": data["usage"],
             "claim_form": claim_form,
             "grouped_claim_form": grouped_form,
+            "confidence": confidence_report,
             "artifacts": {
                 "markdown_path": str(markdown_path),
                 "json_path": str(json_path),

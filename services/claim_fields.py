@@ -48,8 +48,11 @@ class GroupDefinition:
     fields: tuple[str, ...]
     anchor_field: str
     extra_attributes: dict[str, Any] = field(default_factory=dict)
-FIELD_SPECS: tuple[FieldSpec, ...] = (
-    # --- identity ---------------------------------------------------------
+# The field registry is intentionally split into logical sections. This keeps the
+# generated prompt, validation rules, and downstream field mapping easier to scan
+# and maintain without changing the contract semantics.
+
+_IDENTITY_FIELDS: tuple[FieldSpec, ...] = (
     # A few names are self-explanatory and deliberately left without a
     # description to keep the prompt budget down. Ambiguous or easily confused
     # fields always carry one.
@@ -92,10 +95,10 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         field_type="identifier",
         family="identity",
         description=(
-    "Alamat email yang secara eksplisit milik tertanggung/pasien. "
-    "Jangan ekstrak email rumah sakit, dokter, atau agen sebagai email pasien. "
-    "Jika pemilik email tidak jelas, jangan isi field ini."
-),
+            "Alamat email yang secara eksplisit milik tertanggung/pasien. "
+            "Jangan ekstrak email rumah sakit, dokter, atau agen sebagai email pasien. "
+            "Jika pemilik email tidak jelas, jangan isi field ini."
+        ),
     ),
     FieldSpec(
         name="telephone",
@@ -118,7 +121,9 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         family="identity",
         description="Pihak penerima dana, misalnya subscriber atau provider.",
     ),
-    # --- policy -----------------------------------------------------------
+)
+
+_POLICY_FIELDS: tuple[FieldSpec, ...] = (
     FieldSpec(
         name="policy_effective_date",
         kind="scalar",
@@ -139,7 +144,9 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         family="policy",
         description="Nomor agen penjual polis.",
     ),
-    # --- provider ---------------------------------------------------------
+)
+
+_PROVIDER_FIELDS: tuple[FieldSpec, ...] = (
     FieldSpec(name="provider_name", kind="scalar", family="provider"),
     FieldSpec(name="provider_code", kind="scalar", field_type="identifier", family="provider"),
     FieldSpec(
@@ -162,7 +169,9 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         family="provider",
         description="Nama layanan/prosedur dalam kalimat.",
     ),
-    # --- claim header -----------------------------------------------------
+)
+
+_CLAIM_HEADER_FIELDS: tuple[FieldSpec, ...] = (
     FieldSpec(name="claim_number", kind="scalar", field_type="identifier", family="claim"),
     FieldSpec(
         name="sub_claim_no",
@@ -270,6 +279,9 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         family="claim",
         description="Alasan kunjungan yang tertulis di dokumen.",
     ),
+)
+
+_DIAGNOSIS_FIELDS: tuple[FieldSpec, ...] = (
     FieldSpec(name="diagnosis", kind="list", family="diagnosis", list_destination="diagnosis"),
     FieldSpec(
         name="icd_code",
@@ -293,6 +305,29 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         list_destination="pre_existing_conditions",
         description="Penyakit yang sudah ada sebelum klaim.",
     ),
+)
+
+_MEDICATION_FIELDS: tuple[FieldSpec, ...] = (
+    FieldSpec(
+        name="medication",
+        kind="list",
+        family="medication",
+        list_destination="medications",
+        description="Nama obat yang diberikan.",
+    ),
+    FieldSpec(
+        name="medication_record",
+        kind="group",
+        family="medication",
+        group_record_key="medication_records",
+        derived_from=("medication", "dosage", "frequency", "duration"),
+    ),
+    FieldSpec(name="dosage", kind="scalar", family="medication"),
+    FieldSpec(name="frequency", kind="scalar", family="medication"),
+    FieldSpec(name="duration", kind="scalar", family="medication"),
+)
+
+_PROCEDURE_FIELDS: tuple[FieldSpec, ...] = (
     FieldSpec(
         name="procedure",
         kind="list",
@@ -307,19 +342,20 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         list_destination="treatments",
         description="Nama perawatan yang diberikan.",
     ),
-    FieldSpec(
-        name="medication",
-        kind="list",
-        family="medication",
-        list_destination="medications",
-        description="Nama obat yang diberikan.",
-    ),
-    FieldSpec(name="medication_record", kind="group", family="medication", group_record_key="medication_records", derived_from=("medication", "dosage", "frequency", "duration")),
-    FieldSpec(name="dosage", kind="scalar", family="medication"),
-    FieldSpec(name="frequency", kind="scalar", family="medication"),
-    FieldSpec(name="duration", kind="scalar", family="medication"),
+)
+
+_LAB_FIELDS: tuple[FieldSpec, ...] = (
     FieldSpec(name="laboratory_result", kind="scalar", family="lab_result"),
-    FieldSpec(name="lab_result", kind="group", family="lab_result", group_record_key="lab_results", derived_from=("laboratory_result",)),
+    FieldSpec(
+        name="lab_result",
+        kind="group",
+        family="lab_result",
+        group_record_key="lab_results",
+        derived_from=("laboratory_result",),
+    ),
+)
+
+_INVOICE_FIELDS: tuple[FieldSpec, ...] = (
     FieldSpec(name="invoice_number", kind="scalar", field_type="identifier", family="invoice"),
     FieldSpec(name="invoice_date", kind="scalar", field_type="date", family="invoice"),
     FieldSpec(name="subtotal", kind="scalar", field_type="amount", family="invoice"),
@@ -387,6 +423,9 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         family="invoice",
         description="Potongan/diskon yang berlaku.",
     ),
+)
+
+_DOCUMENT_FIELDS: tuple[FieldSpec, ...] = (
     FieldSpec(
         name="supporting_document",
         kind="list",
@@ -394,10 +433,51 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         list_destination="supporting_documents",
         description="Nama dokumen pendukung yang disebut di teks.",
     ),
-    FieldSpec(name="visit_type_analysis", kind="derived", field_type="label", family="claim", derived_from=("visit_type", "admission_date", "discharge_date")),
-    FieldSpec(name="claim_case_type", kind="derived", field_type="label", family="claim", derived_from=("claim_type",)),
-    FieldSpec(name="document_icd_code", kind="derived", field_type="identifier", family="diagnosis", derived_from=("diagnosis", "icd_code")),
-    FieldSpec(name="suggested_icd_code", kind="derived", field_type="identifier", family="diagnosis", derived_from=("diagnosis",)),
+)
+
+_DERIVED_FIELDS: tuple[FieldSpec, ...] = (
+    FieldSpec(
+        name="visit_type_analysis",
+        kind="derived",
+        field_type="label",
+        family="claim",
+        derived_from=("visit_type", "admission_date", "discharge_date"),
+    ),
+    FieldSpec(
+        name="claim_case_type",
+        kind="derived",
+        field_type="label",
+        family="claim",
+        derived_from=("claim_type",),
+    ),
+    FieldSpec(
+        name="document_icd_code",
+        kind="derived",
+        field_type="identifier",
+        family="diagnosis",
+        derived_from=("diagnosis", "icd_code"),
+    ),
+    FieldSpec(
+        name="suggested_icd_code",
+        kind="derived",
+        field_type="identifier",
+        family="diagnosis",
+        derived_from=("diagnosis",),
+    ),
+)
+
+FIELD_SPECS: tuple[FieldSpec, ...] = (
+    *_IDENTITY_FIELDS,
+    *_POLICY_FIELDS,
+    *_PROVIDER_FIELDS,
+    *_CLAIM_HEADER_FIELDS,
+    *_DIAGNOSIS_FIELDS,
+    *_MEDICATION_FIELDS,
+    *_PROCEDURE_FIELDS,
+    *_LAB_FIELDS,
+    *_INVOICE_FIELDS,
+    *_DOCUMENT_FIELDS,
+    *_DERIVED_FIELDS,
 )
 GROUP_DEFINITIONS: tuple[GroupDefinition, ...] = (
     GroupDefinition(record_key="diagnosis_records", family="diagnosis", fields=("diagnosis", "icd_code"), anchor_field="diagnosis", extra_attributes={"document_icd_code_from": "icd_code", "icd_code_records_from": "icd_code"}),

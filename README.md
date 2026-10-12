@@ -39,6 +39,16 @@ Sidebar `Parser PDF/Markdown` mendukung:
 - **MinerU** — `mineru -b pipeline` lokal untuk OCR/layout/table → Markdown, lalu LangExtract.
 - Keduanya dapat dipilih bersamaan untuk membandingkan Markdown dan waktu/hasil extraction.
 
+### Upload beberapa dokumen
+
+Pilih beberapa file sekaligus, lalu pilih mode pemrosesan:
+
+- **Pisah per file** — setiap dokumen mendapat hasil Markdown dan extraction sendiri. File yang formatnya tidak didukung parser akan ditandai gagal tanpa menghentikan file lain.
+- **Gabung Markdown saja** — tiap file tetap diekstrak sendiri; Markdown yang berhasil kemudian digabung per parser untuk preview/download. Jika ada file gagal, hasil gabungan diberi peringatan.
+- **Gabung sebagai satu claim** — OCR dijalankan untuk semua file, Markdown digabung dengan nama sumber dan nomor halaman gabungan, lalu LangExtract dijalankan sekali per parser. Jika salah satu file gagal, claim gabungan parser tersebut dibatalkan.
+
+Mode gabung hanya menawarkan parser yang mendukung semua file terpilih. Artifact tiap sumber dan artifact gabungan tetap tersedia di ZIP.
+
 MinerU sengaja tidak memakai `mineru-api` dan tidak memakai VLM/API. Jika `LANGEXTRACT` gagal, proses MinerU ditandai error agar Markdown tidak diam-diam dianggap sudah terekstraksi; periksa credential/model LangExtract dan log.
 
 ### Konfigurasi
@@ -112,6 +122,10 @@ JSON yang dibaca user bentuknya mengikuti formulir klaim, bukan dump kontrak:
   "review":         { "needs_attention": ["…"] }
 }
 ```
+
+### Docling confidence scores
+
+Jika versi dan pipeline Docling menyediakannya, report dari `ConversionResult.confidence` disimpan di dua tempat: `json_data.confidence` untuk akses cepat dan `json_data.docling_document.confidence` bersama raw document. Report mencakup `mean_grade`/`low_grade`, component scores (`layout_score`, `ocr_score`, `parse_score`, `table_score`), dan score per halaman. Tab **Raw OCR** menampilkan ringkasan serta tabel per halaman. Nilai yang tidak tersedia ditulis `null`, bukan dianggap score nol. Mengikuti dokumentasi Docling, gunakan grade sebagai ringkasan kualitas; score numerik bersifat informational dan dapat berubah.
 
 Aturan yang dijaga:
 

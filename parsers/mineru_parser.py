@@ -50,6 +50,7 @@ def parse_mineru(
     process: subprocess.Popen | None = None
 
     try:
+        config = llm_config or AppConfig.from_file()
         executable = _find_mineru()
         command = [executable, "-p", str(source), "-o", str(output), "-b", backend]
         _emit(log_callback, f"Command: {subprocess.list2cmdline(command)}", started, "starting")
@@ -130,7 +131,6 @@ def parse_mineru(
                 )
             from services.langextract_service import extract_claim_from_markdown
 
-            config = llm_config or AppConfig.from_file()
             langextract_result = extract_claim_from_markdown(
                 markdown=markdown,
                 config=config,
@@ -174,7 +174,11 @@ def parse_mineru(
         # MinerU emits a single Markdown block rather than a per-page OCR tree,
         # so the document inventory degrades to one page.
         claim_form = None
-        page_classifications = classify_pages(raw_ocr_pages, config) if raw_ocr_pages else []
+        page_classifications = (
+            classify_pages(raw_ocr_pages, config)
+            if raw_ocr_pages and information_extraction
+            else []
+        )
         if isinstance(extraction, dict) and extraction.get("claim_data"):
             extraction = apply_document_claim_type(
                 extraction, raw_ocr_pages, page_classifications

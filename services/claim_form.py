@@ -100,7 +100,7 @@ def apply_document_claim_type(
     pages: Sequence[Mapping[str, Any]] | None,
     classifications: Sequence[Mapping[str, Any]] | None,
 ) -> dict[str, Any]:
-    """Derive claim stage from named document pages when the inventory permits it."""
+    """Derive claim stage from page document_type when the inventory is complete."""
     page_classifications = {
         str(item.get("page")): item
         for item in classifications or []
@@ -118,25 +118,13 @@ def apply_document_claim_type(
         )
 
     def is_new_document(classification: Mapping[str, Any]) -> bool:
-        document_type = " ".join(
-            str(classification.get(key) or "")
-            for key in ("document_type", "label", "title")
-        ).lower()
-        return (
-            classification.get("category") == "formulir_klaim"
-            or re.search(r"\bskd\b", document_type) is not None
-            or "surat keterangan dokter" in document_type
-            or "formulir" in document_type
-        )
+        document_type = str(classification.get("document_type") or "").casefold()
+        return re.search(r"\bformulir(?:\s+\w+){0,2}\s+klaim\b", document_type) is not None
 
     new_documents = [
         (page, classification)
         for page, classification in page_documents
         if is_new_document(classification)
-        and (
-            is_named(classification)
-            or classification.get("category") == "formulir_klaim"
-        )
     ]
     inventory_complete = bool(pages) and len(page_documents) == len(pages) and all(
         is_named(classification) for _, classification in page_documents
@@ -148,19 +136,28 @@ def apply_document_claim_type(
     if new_documents:
         claim_value = "new"
         evidence = [
-            str(classification.get("document_type") or classification.get("category"))
+            str(classification.get("document_type"))
             for _, classification in new_documents
         ]
         evidence_refs = [str(page.get("page_number")) for page, _ in new_documents]
-        reason = "Dokumen SKD atau formulir klaim ditemukan; kategori klaim adalah new."
-    elif inventory_complete and current_value != "new":
+        reason = "document_type pada halaman memuat 'formulir klaim'; kategori klaim adalah new."
+    elif inventory_complete:
         claim_value = "completeness"
         evidence = [
             str(classification.get("document_type"))
             for _, classification in page_documents
         ]
         evidence_refs = [str(page.get("page_number")) for page, _ in page_documents]
-        reason = "Semua halaman terklasifikasi dan formulir klaim tidak ditemukan."
+        reason = "Tidak ada document_type halaman yang memuat 'formulir klaim'; kategori klaim adalah completeness."
+    elif pages:
+        claim_value = "unknown"
+        evidence = [
+            str(classification.get("document_type"))
+            for _, classification in page_documents
+            if is_named(classification)
+        ]
+        evidence_refs = [str(page.get("page_number")) for page, _ in page_documents]
+        reason = "Inventory halaman belum lengkap; claim type belum dapat ditentukan."
     else:
         return dict(contract)
 
@@ -237,17 +234,30 @@ def _page_inventory(
                 "category": None,
                 "label": document_title(text),
                 "source": "page_title",
+                **({"source_file": page["source_file"]} if page.get("source_file") else {}),
             })
             continue
         document_type = resolved.get("document_type")
-        inventory.append({
+        entry = {
             "page": page.get("page_number"),
             "document_type": document_type,
             "category": resolved.get("category"),
             "label": resolved.get("label") or document_title(text),
             "source": resolved.get("source", "model"),
-        })
+        }
+        if page.get("source_file"):
+            entry["source_file"] = page["source_file"]
+        inventory.append(entry)
     return {"total_pages": len(inventory), "pages": inventory}
+
+
+def _document_list(document_block: Mapping[str, Any]) -> list[str]:
+    """Create a compact document-name and page list from the full inventory."""
+    return [
+        f"{item['document_type']} - page {item['page']}"
+        for item in document_block.get("pages", [])
+        if item.get("document_type") and item.get("page") is not None
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -596,6 +606,7 @@ def build_claim_form(
     reason = _reason_of_visit(claim_data, visit_block)
     medical = _medical_block(claim_data, analyst_analysis, reason)
     document_block = _page_inventory(pages, classifications)
+    document_list = _document_list(document_block)
 
     needs_attention = list(validation.get("inconsistencies") or [])
     if not medical["icd_codes"] and medical["diagnosis"]:
@@ -608,6 +619,7 @@ def build_claim_form(
     return {
         "schema_version": CLAIM_FORM_VERSION,
         "document": document_block,
+        "document_list": document_list,
         "member_info": _member_block(claim_data, normalized),
         "policy_info": _policy_block(claim_data, normalized),
         "claim": _claim_block(claim_data, normalized, analyst_analysis),
@@ -729,6 +741,7 @@ def build_grouped_claim_form(
     )
     reason = _reason_of_visit(claim_data, visit_block)
     financial = _financial_block(claim_data, normalized)
+    document_block = _page_inventory(pages, classifications)
     visit_value = visit_block.get("type_of_visit") or "unknown"
     claim_value = (analyst_analysis.get("claim_case_type") or {}).get(
         "value", "unknown"
@@ -746,7 +759,11 @@ def build_grouped_claim_form(
     is_rj = decision_flag("isRJ", visit_value == "outpatient")
     visit_conf = (analyst_analysis.get("visit_type") or {}).get("confidence")
 
-    grouped: dict[str, Any] = {"schema_version": CLAIM_GROUPED_VERSION}
+    grouped: dict[str, Any] = {
+        "schema_version": CLAIM_GROUPED_VERSION,
+        "document": document_block,
+        "document_list": _document_list(document_block),
+    }
     grouped["isNewClaim"] = decision_flag("isNewClaim", claim_value == "new")
     grouped["isKelengkapan"] = bool(
         decision_flag("isKelengkapan", claim_value == "completeness")

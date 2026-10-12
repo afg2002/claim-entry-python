@@ -9,5 +9,5 @@ def text_similarity(a:str,b:str)->float:
     a=" ".join((a or "").split()); b=" ".join((b or "").split())
     return 100.0 if not a and not b else round(difflib.SequenceMatcher(None,a,b,autojunk=False).ratio()*100,2)
 def similarity_matrix(results:list[dict[str,Any]])->pd.DataFrame:
-    names=[x.get("parser","Unknown") for x in results]
+    names=[x.get("display_name",x.get("parser","Unknown")) for x in results]
     return pd.DataFrame([[text_similarity(a.get("markdown",""),b.get("markdown","")) for b in results] for a in results],index=names,columns=names)
